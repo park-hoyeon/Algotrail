@@ -17,6 +17,10 @@ import com.algotrail.backend.domain.category.entity.Category;
 import com.algotrail.backend.domain.category.repository.CategoryRepository;
 import com.algotrail.backend.domain.problem.entity.ProblemCategory;
 import com.algotrail.backend.domain.problem.repository.ProblemCategoryRepository;
+import com.algotrail.backend.domain.github.entity.GithubSyncLog;
+import com.algotrail.backend.domain.github.entity.GithubSyncStatus;
+import com.algotrail.backend.domain.github.repository.GithubSyncLogRepository;
+import java.time.LocalDateTime;
 
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -33,42 +37,111 @@ public class GithubSyncService {
     private final ReviewScheduleRepository reviewScheduleRepository;
     private final CategoryRepository categoryRepository;
     private final ProblemCategoryRepository problemCategoryRepository;
+    private final GithubSyncLogRepository githubSyncLogRepository;
 
     public GithubSyncResponse sync(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
+        LocalDateTime startedAt = LocalDateTime.now();
 
-        String url = "https://api.github.com/repos/"
-                + user.getGithubUsername()
-                + "/"
-                + user.getGithubRepo()
-                + "/contents";
+        try {
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
 
-        GithubContentResponse[] contents = webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToMono(GithubContentResponse[].class)
-                .block();
+            String url = "https://api.github.com/repos/"
+                    + user.getGithubUsername()
+                    + "/"
+                    + user.getGithubRepo()
+                    + "/contents";
 
-        if (contents == null) {
-            return new GithubSyncResponse(userId, 0, "GitHub 저장소에서 파일을 가져오지 못했습니다.");
-        }
+            GithubContentResponse[] contents = webClient.get()
+                    .uri(url)
+                    .retrieve()
+                    .bodyToMono(GithubContentResponse[].class)
+                    .block();
 
-        int newSolvedCount = 0;
+            if (contents == null) {
+                LocalDateTime finishedAt = LocalDateTime.now();
+                String message = "GitHub 저장소에서 파일을 가져오지 못했습니다.";
 
-        for (GithubContentResponse content : contents) {
-            if (!isProgrammersDirectory(content)) {
-                continue;
+                githubSyncLogRepository.save(new GithubSyncLog(
+                        userId,
+                        startedAt,
+                        finishedAt,
+                        0,
+                        0,
+                        GithubSyncStatus.FAILED,
+                        message
+                ));
+
+                return new GithubSyncResponse(
+                        userId,
+                        0,
+                        0,
+                        startedAt,
+                        finishedAt,
+                        "FAILED",
+                        message
+                );
             }
 
-            newSolvedCount += syncProgrammersDirectory(user, content.path());
-        }
+            int newSolvedCount = 0;
+            int skippedCount = 0;
 
-        return new GithubSyncResponse(
-                userId,
-                newSolvedCount,
-                "새로운 풀이 " + newSolvedCount + "개를 동기화했습니다."
-        );
+            for (GithubContentResponse content : contents) {
+                if (!isProgrammersDirectory(content)) {
+                    continue;
+                }
+
+                int beforeCount = newSolvedCount;
+                newSolvedCount += syncProgrammersDirectory(user, content.path());
+            }
+
+            LocalDateTime finishedAt = LocalDateTime.now();
+            String message = "새로운 풀이 " + newSolvedCount + "개를 동기화했습니다.";
+
+            githubSyncLogRepository.save(new GithubSyncLog(
+                    userId,
+                    startedAt,
+                    finishedAt,
+                    newSolvedCount,
+                    skippedCount,
+                    GithubSyncStatus.SUCCESS,
+                    message
+            ));
+
+            return new GithubSyncResponse(
+                    userId,
+                    newSolvedCount,
+                    skippedCount,
+                    startedAt,
+                    finishedAt,
+                    "SUCCESS",
+                    message
+            );
+
+        } catch (Exception e) {
+            LocalDateTime finishedAt = LocalDateTime.now();
+            String message = "GitHub 동기화 중 오류가 발생했습니다: " + e.getMessage();
+
+            githubSyncLogRepository.save(new GithubSyncLog(
+                    userId,
+                    startedAt,
+                    finishedAt,
+                    0,
+                    0,
+                    GithubSyncStatus.FAILED,
+                    message
+            ));
+
+            return new GithubSyncResponse(
+                    userId,
+                    0,
+                    0,
+                    startedAt,
+                    finishedAt,
+                    "FAILED",
+                    message
+            );
+        }
     }
 
     private int syncProgrammersDirectory(User user, String programmersPath) {
