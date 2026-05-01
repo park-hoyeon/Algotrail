@@ -1,9 +1,18 @@
 package com.algotrail.backend.domain.github.service;
 
+import com.algotrail.backend.domain.category.entity.Category;
+import com.algotrail.backend.domain.category.repository.CategoryRepository;
+import com.algotrail.backend.domain.github.dto.GithubCommitResponse;
 import com.algotrail.backend.domain.github.dto.GithubContentResponse;
 import com.algotrail.backend.domain.github.dto.GithubSyncResponse;
+import com.algotrail.backend.domain.github.dto.SyncResult;
+import com.algotrail.backend.domain.github.entity.GithubSyncLog;
+import com.algotrail.backend.domain.github.entity.GithubSyncStatus;
+import com.algotrail.backend.domain.github.repository.GithubSyncLogRepository;
 import com.algotrail.backend.domain.problem.entity.Problem;
+import com.algotrail.backend.domain.problem.entity.ProblemCategory;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
+import com.algotrail.backend.domain.problem.repository.ProblemCategoryRepository;
 import com.algotrail.backend.domain.problem.repository.ProblemRepository;
 import com.algotrail.backend.domain.problem.repository.SolvedProblemRepository;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
@@ -13,20 +22,11 @@ import com.algotrail.backend.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import com.algotrail.backend.domain.category.entity.Category;
-import com.algotrail.backend.domain.category.repository.CategoryRepository;
-import com.algotrail.backend.domain.problem.entity.ProblemCategory;
-import com.algotrail.backend.domain.problem.repository.ProblemCategoryRepository;
-import com.algotrail.backend.domain.github.entity.GithubSyncLog;
-import com.algotrail.backend.domain.github.entity.GithubSyncStatus;
-import com.algotrail.backend.domain.github.repository.GithubSyncLogRepository;
-import java.time.LocalDateTime;
-import com.algotrail.backend.domain.github.dto.GithubCommitResponse;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
-
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 
@@ -87,20 +87,26 @@ public class GithubSyncService {
                 );
             }
 
-            int newSolvedCount = 0;
-            int skippedCount = 0;
+            SyncResult totalResult = SyncResult.none();
 
             for (GithubContentResponse content : contents) {
                 if (!isProgrammersDirectory(content)) {
                     continue;
                 }
 
-                int beforeCount = newSolvedCount;
-                newSolvedCount += syncProgrammersDirectory(user, content.path());
+                SyncResult result = syncProgrammersDirectory(user, content.path());
+                totalResult = totalResult.plus(result);
             }
 
+            int newSolvedCount = totalResult.addedCount();
+            int skippedCount = totalResult.skippedCount();
+
             LocalDateTime finishedAt = LocalDateTime.now();
-            String message = "새로운 풀이 " + newSolvedCount + "개를 동기화했습니다.";
+
+            String message = "새로운 풀이 " + newSolvedCount
+                    + "개를 동기화했습니다. 기존 풀이 "
+                    + skippedCount
+                    + "개는 건너뛰었습니다.";
 
             githubSyncLogRepository.save(new GithubSyncLog(
                     userId,
@@ -148,8 +154,7 @@ public class GithubSyncService {
         }
     }
 
-    private int syncProgrammersDirectory(User user, String programmersPath) {
-
+    private SyncResult syncProgrammersDirectory(User user, String programmersPath) {
         String url = "https://api.github.com/repos/"
                 + user.getGithubUsername()
                 + "/"
@@ -164,29 +169,29 @@ public class GithubSyncService {
                 .block();
 
         if (levelDirs == null) {
-            return 0;
+            return SyncResult.none();
         }
 
-        int count = 0;
+        SyncResult totalResult = SyncResult.none();
 
         for (GithubContentResponse levelDir : levelDirs) {
             if (!"dir".equals(levelDir.type())) {
                 continue;
             }
 
-            count += syncLevelDirectory(
+            SyncResult result = syncLevelDirectory(
                     user,
                     levelDir.path(),
                     levelDir.name()
             );
+
+            totalResult = totalResult.plus(result);
         }
 
-        return count;
+        return totalResult;
     }
 
-
-    private int syncLevelDirectory(User user, String levelPath, String levelName) {
-
+    private SyncResult syncLevelDirectory(User user, String levelPath, String levelName) {
         String url = "https://api.github.com/repos/"
                 + user.getGithubUsername()
                 + "/"
@@ -201,36 +206,30 @@ public class GithubSyncService {
                 .block();
 
         if (problemDirs == null) {
-            return 0;
+            return SyncResult.none();
         }
 
-        int count = 0;
+        SyncResult totalResult = SyncResult.none();
 
         for (GithubContentResponse problemDir : problemDirs) {
             if (!"dir".equals(problemDir.type())) {
                 continue;
             }
 
-            count += syncProblemDirectory(
+            SyncResult result = syncProblemDirectory(
                     user,
                     problemDir.path(),
                     normalizeLevel(levelName),
                     parseProblemTitle(problemDir.name())
             );
+
+            totalResult = totalResult.plus(result);
         }
 
-        return count;
+        return totalResult;
     }
 
-    private String parseProblemTitle(String directoryName) {
-        if (directoryName.contains(". ")) {
-            return directoryName.substring(directoryName.indexOf(". ") + 2);
-        }
-
-        return directoryName;
-    }
-
-    private int syncProblemDirectory(User user, String problemPath, String levelName, String problemTitle) {
+    private SyncResult syncProblemDirectory(User user, String problemPath, String levelName, String problemTitle) {
         String url = "https://api.github.com/repos/"
                 + user.getGithubUsername()
                 + "/"
@@ -245,7 +244,7 @@ public class GithubSyncService {
                 .block();
 
         if (files == null) {
-            return 0;
+            return SyncResult.none();
         }
 
         List<GithubContentResponse> codeFiles = Arrays.stream(files)
@@ -254,7 +253,7 @@ public class GithubSyncService {
                 .toList();
 
         if (codeFiles.isEmpty()) {
-            return 0;
+            return SyncResult.none();
         }
 
         GithubContentResponse codeFile = codeFiles.get(0);
@@ -269,8 +268,10 @@ public class GithubSyncService {
                         )
                 ));
 
+        saveAutoCategory(problem, problemTitle);
+
         if (solvedProblemRepository.existsByUserAndProblem(user, problem)) {
-            return 0;
+            return SyncResult.skipped();
         }
 
         LocalDate solvedDate = fetchLatestCommitDate(user, problemPath);
@@ -287,7 +288,7 @@ public class GithubSyncService {
 
         createReviewSchedules(solvedProblem);
 
-        return 1;
+        return SyncResult.added();
     }
 
     private LocalDate fetchLatestCommitDate(User user, String problemPath) {
@@ -349,6 +350,14 @@ public class GithubSyncService {
                 3,
                 solvedDate.plusDays(14)
         ));
+    }
+
+    private String parseProblemTitle(String directoryName) {
+        if (directoryName.contains(". ")) {
+            return directoryName.substring(directoryName.indexOf(". ") + 2);
+        }
+
+        return directoryName;
     }
 
     private boolean isProgrammersDirectory(GithubContentResponse content) {
