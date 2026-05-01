@@ -21,6 +21,10 @@ import com.algotrail.backend.domain.github.entity.GithubSyncLog;
 import com.algotrail.backend.domain.github.entity.GithubSyncStatus;
 import com.algotrail.backend.domain.github.repository.GithubSyncLogRepository;
 import java.time.LocalDateTime;
+import com.algotrail.backend.domain.github.dto.GithubCommitResponse;
+import org.springframework.web.util.UriComponentsBuilder;
+
+import java.net.URI;
 
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -265,11 +269,11 @@ public class GithubSyncService {
                         )
                 ));
 
-        saveAutoCategory(problem, problemTitle);
-
         if (solvedProblemRepository.existsByUserAndProblem(user, problem)) {
             return 0;
         }
+
+        LocalDate solvedDate = fetchLatestCommitDate(user, problemPath);
 
         SolvedProblem solvedProblem = solvedProblemRepository.save(
                 new SolvedProblem(
@@ -277,13 +281,52 @@ public class GithubSyncService {
                         problem,
                         codeFile.html_url(),
                         detectLanguage(codeFile.name()),
-                        LocalDate.now()
+                        solvedDate
                 )
         );
 
         createReviewSchedules(solvedProblem);
 
         return 1;
+    }
+
+    private LocalDate fetchLatestCommitDate(User user, String problemPath) {
+        try {
+            URI uri = UriComponentsBuilder
+                    .fromUriString("https://api.github.com/repos/"
+                            + user.getGithubUsername()
+                            + "/"
+                            + user.getGithubRepo()
+                            + "/commits")
+                    .queryParam("path", problemPath)
+                    .queryParam("per_page", 1)
+                    .build()
+                    .encode()
+                    .toUri();
+
+            GithubCommitResponse[] commits = webClient.get()
+                    .uri(uri)
+                    .retrieve()
+                    .bodyToMono(GithubCommitResponse[].class)
+                    .block();
+
+            if (commits == null || commits.length == 0) {
+                return LocalDate.now();
+            }
+
+            if (commits[0].commit() == null || commits[0].commit().author() == null) {
+                return LocalDate.now();
+            }
+
+            return commits[0]
+                    .commit()
+                    .author()
+                    .date()
+                    .toLocalDate();
+
+        } catch (Exception e) {
+            return LocalDate.now();
+        }
     }
 
     private void createReviewSchedules(SolvedProblem solvedProblem) {
