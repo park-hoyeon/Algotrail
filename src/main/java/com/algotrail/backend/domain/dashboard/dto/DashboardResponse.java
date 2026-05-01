@@ -1,9 +1,11 @@
 package com.algotrail.backend.domain.dashboard.dto;
 
+import com.algotrail.backend.domain.github.entity.GithubSyncLog;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public record DashboardResponse(
@@ -13,7 +15,8 @@ public record DashboardResponse(
         long reviewCompletedCount,
         int todayCompletionRate,
         List<TodayReviewItem> todayReviews,
-        List<RecentSolvedItem> recentSolvedProblems
+        List<RecentSolvedItem> recentSolvedProblems,
+        LastGithubSyncInfo lastGithubSyncInfo
 ) {
     public record TodayReviewItem(
             Long reviewScheduleId,
@@ -68,6 +71,30 @@ public record DashboardResponse(
                     solvedProblem.getStatus(),
                     solvedProblem.getSolvedDate(),
                     solvedProblem.getGithubUrl()
+            );
+        }
+    }
+
+    public record LastGithubSyncInfo(
+            LocalDateTime syncStartedAt,
+            LocalDateTime syncFinishedAt,
+            int addedCount,
+            int skippedCount,
+            String status,
+            String message
+    ) {
+        public static LastGithubSyncInfo from(GithubSyncLog log) {
+            if (log == null) {
+                return null;
+            }
+
+            return new LastGithubSyncInfo(
+                    log.getSyncStartedAt(),
+                    log.getSyncFinishedAt(),
+                    log.getAddedCount(),
+                    log.getSkippedCount(),
+                    log.getStatus().name(),
+                    log.getMessage()
             );
         }
     }

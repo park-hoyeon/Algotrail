@@ -1,6 +1,8 @@
 package com.algotrail.backend.domain.dashboard.service;
 
 import com.algotrail.backend.domain.dashboard.dto.DashboardResponse;
+import com.algotrail.backend.domain.github.entity.GithubSyncLog;
+import com.algotrail.backend.domain.github.repository.GithubSyncLogRepository;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.problem.repository.SolvedProblemRepository;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
@@ -17,6 +19,7 @@ public class DashboardService {
 
     private final SolvedProblemRepository solvedProblemRepository;
     private final ReviewScheduleRepository reviewScheduleRepository;
+    private final GithubSyncLogRepository githubSyncLogRepository;
 
     public DashboardResponse getDashboard(Long userId) {
         LocalDate today = LocalDate.now();
@@ -36,6 +39,10 @@ public class DashboardService {
         List<SolvedProblem> recentSolvedProblems =
                 solvedProblemRepository.findTop5ByUserIdOrderBySolvedDateDesc(userId);
 
+        GithubSyncLog lastSyncLog = githubSyncLogRepository
+                .findTopByUserIdOrderBySyncStartedAtDesc(userId)
+                .orElse(null);
+
         int totalTodayTasks = (int) (todaySolvedCount + todayReviews.size());
         int completedTodayTasks = (int) todaySolvedCount;
 
@@ -54,7 +61,8 @@ public class DashboardService {
                         .toList(),
                 recentSolvedProblems.stream()
                         .map(DashboardResponse.RecentSolvedItem::from)
-                        .toList()
+                        .toList(),
+                DashboardResponse.LastGithubSyncInfo.from(lastSyncLog)
         );
     }
 }
