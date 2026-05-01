@@ -51,4 +51,18 @@ public class SolvedProblem {
     public void updateStatus(String status) {
         this.status = status;
     }
+
+    public void updateInfo(String status, Integer solveTimeMinutes, String memo) {
+        if (status != null) {
+            this.status = status;
+        }
+
+        if (solveTimeMinutes != null) {
+            this.solveTimeMinutes = solveTimeMinutes;
+        }
+
+        if (memo != null) {
+            this.memo = memo;
+        }
+    }
 }

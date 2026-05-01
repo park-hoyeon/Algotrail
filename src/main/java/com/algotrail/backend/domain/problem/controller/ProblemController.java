@@ -5,6 +5,8 @@ import com.algotrail.backend.domain.problem.dto.ProblemListResponse;
 import com.algotrail.backend.domain.problem.service.ProblemService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import com.algotrail.backend.domain.problem.dto.ProblemUpdateRequest;
+import com.algotrail.backend.domain.problem.dto.ProblemUpdateResponse;
 
 import java.util.List;
 
@@ -23,5 +25,13 @@ public class ProblemController {
     @GetMapping("/{solvedProblemId}")
     public ProblemDetailResponse getProblemDetail(@PathVariable Long solvedProblemId) {
         return problemService.getProblemDetail(solvedProblemId);
+    }
+
+    @PatchMapping("/{solvedProblemId}")
+    public ProblemUpdateResponse updateProblem(
+            @PathVariable Long solvedProblemId,
+            @RequestBody ProblemUpdateRequest request
+    ) {
+        return problemService.updateProblem(solvedProblemId, request);
     }
 }

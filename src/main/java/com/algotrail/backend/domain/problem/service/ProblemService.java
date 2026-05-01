@@ -8,6 +8,8 @@ import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import com.algotrail.backend.domain.problem.dto.ProblemUpdateRequest;
+import com.algotrail.backend.domain.problem.dto.ProblemUpdateResponse;
 
 import java.util.List;
 
@@ -33,5 +35,26 @@ public class ProblemService {
                 reviewScheduleRepository.findBySolvedProblemOrderByReviewRoundAsc(solvedProblem);
 
         return ProblemDetailResponse.of(solvedProblem, reviewSchedules);
+    }
+
+    public ProblemUpdateResponse updateProblem(Long solvedProblemId, ProblemUpdateRequest request) {
+        SolvedProblem solvedProblem = solvedProblemRepository.findById(solvedProblemId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 풀이 기록입니다."));
+
+        solvedProblem.updateInfo(
+                request.status(),
+                request.solveTimeMinutes(),
+                request.memo()
+        );
+
+        solvedProblemRepository.save(solvedProblem);
+
+        return new ProblemUpdateResponse(
+                solvedProblem.getId(),
+                solvedProblem.getStatus(),
+                solvedProblem.getSolveTimeMinutes(),
+                solvedProblem.getMemo(),
+                "문제 기록이 수정되었습니다."
+        );
     }
 }
