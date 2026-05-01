@@ -110,4 +110,17 @@ public class ReviewService {
                 reviews
         );
     }
+
+    public List<ProblemReviewScheduleResponse> getProblemReviewSchedules(Long solvedProblemId) {
+        return reviewScheduleRepository.findBySolvedProblemIdOrderByReviewRoundAsc(solvedProblemId)
+                .stream()
+                .map(schedule -> new ProblemReviewScheduleResponse(
+                        schedule.getId(),
+                        schedule.getReviewRound(),
+                        schedule.getReviewDate(),
+                        schedule.getStatus(),
+                        schedule.getCompletedAt()
+                ))
+                .toList();
+    }
 }

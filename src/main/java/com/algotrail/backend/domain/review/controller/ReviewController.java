@@ -5,6 +5,8 @@ import com.algotrail.backend.domain.review.service.ReviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/reviews")
 @RequiredArgsConstructor
@@ -36,5 +38,12 @@ public class ReviewController {
             @RequestParam(defaultValue = "7") int days
     ) {
         return reviewService.getUpcomingReviews(userId, days);
+    }
+
+    @GetMapping("/problem/{solvedProblemId}")
+    public List<ProblemReviewScheduleResponse> getProblemReviewSchedules(
+            @PathVariable Long solvedProblemId
+    ) {
+        return reviewService.getProblemReviewSchedules(solvedProblemId);
     }
 }
