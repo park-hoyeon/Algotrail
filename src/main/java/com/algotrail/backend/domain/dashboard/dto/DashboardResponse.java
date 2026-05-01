@@ -68,7 +68,7 @@ public record DashboardResponse(
                     solvedProblem.getProblem().getTitle(),
                     solvedProblem.getProblem().getLevel(),
                     solvedProblem.getLanguage(),
-                    solvedProblem.getStatus(),
+                    solvedProblem.getStatus().name(),
                     solvedProblem.getSolvedDate(),
                     solvedProblem.getGithubUrl()
             );

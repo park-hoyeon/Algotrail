@@ -1,14 +1,15 @@
 package com.algotrail.backend.domain.review.service;
 
+import com.algotrail.backend.domain.problem.entity.ProblemStatus;
+import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.review.dto.ReviewCompleteResponse;
+import com.algotrail.backend.domain.review.dto.ReviewRetryRequest;
+import com.algotrail.backend.domain.review.dto.ReviewRetryResponse;
 import com.algotrail.backend.domain.review.dto.ReviewTodayResponse;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import com.algotrail.backend.domain.problem.entity.SolvedProblem;
-import com.algotrail.backend.domain.review.dto.ReviewRetryRequest;
-import com.algotrail.backend.domain.review.dto.ReviewRetryResponse;
 
 import java.time.LocalDate;
 
@@ -53,10 +54,8 @@ public class ReviewService {
 
         SolvedProblem solvedProblem = reviewSchedule.getSolvedProblem();
 
-        // 상태 변경
-        solvedProblem.updateStatus("RETRY_REQUIRED");
+        solvedProblem.updateStatus(ProblemStatus.RETRY);
 
-        // 메모 추가 (기존 메모에 이어붙이기)
         if (request.memo() != null && !request.memo().isBlank()) {
             String existingMemo = solvedProblem.getMemo() == null ? "" : solvedProblem.getMemo();
 
@@ -70,7 +69,7 @@ public class ReviewService {
         return new ReviewRetryResponse(
                 reviewSchedule.getId(),
                 solvedProblem.getId(),
-                solvedProblem.getStatus(),
+                solvedProblem.getStatus().name(),
                 "다시 풀기 필요 상태로 변경되었습니다."
         );
     }

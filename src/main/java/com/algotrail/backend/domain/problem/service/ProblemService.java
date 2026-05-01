@@ -8,6 +8,7 @@ import com.algotrail.backend.domain.problem.dto.ProblemUpdateRequest;
 import com.algotrail.backend.domain.problem.dto.ProblemUpdateResponse;
 import com.algotrail.backend.domain.problem.entity.Problem;
 import com.algotrail.backend.domain.problem.entity.ProblemCategory;
+import com.algotrail.backend.domain.problem.entity.ProblemStatus;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.problem.repository.ProblemCategoryRepository;
 import com.algotrail.backend.domain.problem.repository.SolvedProblemRepository;
@@ -71,10 +72,9 @@ public class ProblemService {
 
         return new ProblemUpdateResponse(
                 solvedProblem.getId(),
-                solvedProblem.getStatus(),
+                solvedProblem.getStatus().name(),
                 solvedProblem.getSolveTimeMinutes(),
-                solvedProblem.getMemo(),
-                "문제 기록이 수정되었습니다."
+                solvedProblem.getMemo()
         );
     }
 
@@ -101,16 +101,16 @@ public class ProblemService {
             trimmedKeyword = keyword.trim();
         }
 
-        String trimmedStatus = null;
+        ProblemStatus problemStatus = null;
         if (status != null && !status.isBlank()) {
-            trimmedStatus = status.trim();
+            problemStatus = ProblemStatus.valueOf(status.trim().toUpperCase());
         }
 
         return solvedProblemRepository.searchProblems(
                         userId,
                         trimmedKeyword,
                         categoryId,
-                        trimmedStatus
+                        problemStatus
                 )
                 .stream()
                 .map(solvedProblem -> {

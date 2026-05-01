@@ -1,6 +1,7 @@
 package com.algotrail.backend.domain.problem.repository;
 
 import com.algotrail.backend.domain.problem.entity.Problem;
+import com.algotrail.backend.domain.problem.entity.ProblemStatus;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.user.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -31,26 +32,26 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
     );
 
     @Query("""
-            SELECT DISTINCT sp
-            FROM SolvedProblem sp
-            JOIN FETCH sp.problem p
-            WHERE sp.user.id = :userId
-              AND (:keyword IS NULL OR p.title LIKE CONCAT('%', :keyword, '%'))
-              AND (:status IS NULL OR sp.status = :status)
-              AND (
-                    :categoryId IS NULL OR EXISTS (
-                        SELECT pc.id
-                        FROM ProblemCategory pc
-                        WHERE pc.problem = p
-                          AND pc.category.id = :categoryId
-                    )
-              )
-            ORDER BY sp.solvedDate DESC
-            """)
+        SELECT DISTINCT sp
+        FROM SolvedProblem sp
+        JOIN FETCH sp.problem p
+        WHERE sp.user.id = :userId
+          AND (:keyword IS NULL OR p.title LIKE CONCAT('%', :keyword, '%'))
+          AND (:status IS NULL OR sp.status = :status)
+          AND (
+                :categoryId IS NULL OR EXISTS (
+                    SELECT pc.id
+                    FROM ProblemCategory pc
+                    WHERE pc.problem = p
+                      AND pc.category.id = :categoryId
+                )
+          )
+        ORDER BY sp.solvedDate DESC
+        """)
     List<SolvedProblem> searchProblems(
             @Param("userId") Long userId,
             @Param("keyword") String keyword,
             @Param("categoryId") Long categoryId,
-            @Param("status") String status
+            @Param("status") ProblemStatus status
     );
 }

@@ -4,7 +4,6 @@ public record ProblemUpdateResponse(
         Long solvedProblemId,
         String status,
         Integer solveTimeMinutes,
-        String memo,
-        String message
+        String memo
 ) {
 }

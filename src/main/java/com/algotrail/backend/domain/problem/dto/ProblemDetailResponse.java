@@ -37,7 +37,7 @@ public record ProblemDetailResponse(
                         .map(CategoryItem::from)
                         .toList(),
                 solvedProblem.getLanguage(),
-                solvedProblem.getStatus(),
+                solvedProblem.getStatus().name(),
                 solvedProblem.getGithubUrl(),
                 solvedProblem.getSolvedDate(),
                 solvedProblem.getSolveTimeMinutes(),

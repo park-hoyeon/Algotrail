@@ -3,6 +3,8 @@ package com.algotrail.backend.domain.problem.entity;
 import com.algotrail.backend.domain.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 
 import java.time.LocalDate;
 
@@ -32,7 +34,8 @@ public class SolvedProblem {
 
     private LocalDate solvedDate;
 
-    private String status; // SOLVED / REVIEW_REQUIRED 등
+    @Enumerated(EnumType.STRING)
+    private ProblemStatus status;
 
     private Integer solveTimeMinutes;
 
@@ -45,14 +48,14 @@ public class SolvedProblem {
         this.githubUrl = githubUrl;
         this.language = language;
         this.solvedDate = solvedDate;
-        this.status = "SOLVED";
+        this.status = ProblemStatus.SOLVED;
     }
 
-    public void updateStatus(String status) {
+    public void updateStatus(ProblemStatus status) {
         this.status = status;
     }
 
-    public void updateInfo(String status, Integer solveTimeMinutes, String memo) {
+    public void updateInfo(ProblemStatus status, Integer solveTimeMinutes, String memo) {
         if (status != null) {
             this.status = status;
         }

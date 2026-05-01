@@ -32,7 +32,7 @@ public record ProblemListResponse(
                         .map(pc -> pc.getCategory().getName())
                         .toList(),
                 solvedProblem.getSolvedDate(),
-                solvedProblem.getStatus(),
+                solvedProblem.getStatus().name(),
                 solvedProblem.getLanguage(),
                 solvedProblem.getGithubUrl()
         );
