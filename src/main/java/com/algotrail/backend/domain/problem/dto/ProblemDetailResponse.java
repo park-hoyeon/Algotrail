@@ -1,5 +1,6 @@
 package com.algotrail.backend.domain.problem.dto;
 
+import com.algotrail.backend.domain.problem.entity.ProblemCategory;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 
@@ -12,6 +13,7 @@ public record ProblemDetailResponse(
         String title,
         String platform,
         String level,
+        List<CategoryItem> categories,
         String language,
         String status,
         String githubUrl,
@@ -22,6 +24,7 @@ public record ProblemDetailResponse(
 ) {
     public static ProblemDetailResponse of(
             SolvedProblem solvedProblem,
+            List<ProblemCategory> problemCategories,
             List<ReviewSchedule> reviewSchedules
     ) {
         return new ProblemDetailResponse(
@@ -30,6 +33,9 @@ public record ProblemDetailResponse(
                 solvedProblem.getProblem().getTitle(),
                 solvedProblem.getProblem().getPlatform(),
                 solvedProblem.getProblem().getLevel(),
+                problemCategories.stream()
+                        .map(CategoryItem::from)
+                        .toList(),
                 solvedProblem.getLanguage(),
                 solvedProblem.getStatus(),
                 solvedProblem.getGithubUrl(),
@@ -40,6 +46,18 @@ public record ProblemDetailResponse(
                         .map(ReviewScheduleResponse::from)
                         .toList()
         );
+    }
+
+    public record CategoryItem(
+            Long categoryId,
+            String name
+    ) {
+        public static CategoryItem from(ProblemCategory problemCategory) {
+            return new CategoryItem(
+                    problemCategory.getCategory().getId(),
+                    problemCategory.getCategory().getName()
+            );
+        }
     }
 
     public record ReviewScheduleResponse(
