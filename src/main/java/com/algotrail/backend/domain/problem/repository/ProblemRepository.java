@@ -8,4 +8,5 @@ import java.util.Optional;
 public interface ProblemRepository extends JpaRepository<Problem, Long> {
 
     Optional<Problem> findByPlatformAndTitle(String platform, String title);
+    Optional<Problem> findByPlatformAndProblemNumber(String platform, Long problemNumber);
 }

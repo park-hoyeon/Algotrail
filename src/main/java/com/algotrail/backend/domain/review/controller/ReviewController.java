@@ -20,8 +20,8 @@ public class ReviewController {
     }
 
     @PatchMapping("/{reviewScheduleId}/complete")
-    public ReviewCompleteResponse completeReview(@PathVariable Long reviewScheduleId) {
-        return reviewService.completeReview(reviewScheduleId);
+    public void completeReview(@PathVariable Long reviewScheduleId) {
+        reviewService.completeReview(reviewScheduleId);
     }
 
     @PatchMapping("/{reviewScheduleId}/retry")

@@ -30,19 +30,27 @@ public class ReviewService {
         return ReviewTodayResponse.of(today, reviews);
     }
 
-    public ReviewCompleteResponse completeReview(Long reviewScheduleId) {
-        ReviewSchedule reviewSchedule = reviewScheduleRepository.findById(reviewScheduleId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 복습 일정입니다."));
+    public void completeReview(Long reviewScheduleId) {
+        ReviewSchedule schedule = reviewScheduleRepository.findById(reviewScheduleId)
+                .orElseThrow(() -> new IllegalArgumentException("복습 일정을 찾을 수 없습니다."));
 
-        reviewSchedule.complete();
-        reviewScheduleRepository.save(reviewSchedule);
+        schedule.complete();
 
-        return new ReviewCompleteResponse(
-                reviewSchedule.getId(),
-                reviewSchedule.getStatus(),
-                reviewSchedule.getCompletedAt(),
-                "복습이 완료되었습니다."
-        );
+        int nextRound = schedule.getReviewRound() + 1;
+
+        if (nextRound <= 3) {
+            int nextDays = switch (nextRound) {
+                case 2 -> 7;
+                case 3 -> 14;
+                default -> throw new IllegalStateException("잘못된 복습 회차입니다.");
+            };
+
+            reviewScheduleRepository.save(new ReviewSchedule(
+                    schedule.getSolvedProblem(),
+                    nextRound,
+                    schedule.getSolvedProblem().getSolvedDate().plusDays(nextDays)
+            ));
+        }
     }
 
     public ReviewRetryResponse retryReview(Long reviewScheduleId, ReviewRetryRequest request) {
@@ -78,11 +86,9 @@ public class ReviewService {
 
         List<ReviewSchedule> schedules =
                 reviewScheduleRepository
-                        .findBySolvedProblemUserIdAndStatusAndReviewDateBetweenOrderByReviewDateAsc(
-                                userId,
+                        .findTop20ByStatusAndReviewDateLessThanEqualOrderByReviewDateAsc(
                                 "PENDING",
-                                startDate,
-                                endDate
+                                LocalDate.now()
                         );
 
         List<UpcomingReviewResponse.UpcomingReviewItem> reviews = schedules.stream()

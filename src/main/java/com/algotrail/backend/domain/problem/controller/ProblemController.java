@@ -1,12 +1,9 @@
 package com.algotrail.backend.domain.problem.controller;
 
-import com.algotrail.backend.domain.problem.dto.ProblemDetailResponse;
-import com.algotrail.backend.domain.problem.dto.ProblemListResponse;
+import com.algotrail.backend.domain.problem.dto.*;
 import com.algotrail.backend.domain.problem.service.ProblemService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-import com.algotrail.backend.domain.problem.dto.ProblemUpdateRequest;
-import com.algotrail.backend.domain.problem.dto.ProblemUpdateResponse;
 
 import java.util.List;
 
@@ -43,5 +40,13 @@ public class ProblemController {
             @RequestBody ProblemUpdateRequest request
     ) {
         return problemService.updateProblem(solvedProblemId, request);
+    }
+
+    @PatchMapping("/{solvedProblemId}/category")
+    public ProblemCategoryUpdateResponse updateProblemCategory(
+            @PathVariable Long solvedProblemId,
+            @RequestBody ProblemCategoryUpdateRequest request
+    ) {
+        return problemService.updateProblemCategory(solvedProblemId, request);
     }
 }

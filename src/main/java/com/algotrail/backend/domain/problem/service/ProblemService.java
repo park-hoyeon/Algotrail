@@ -2,10 +2,7 @@ package com.algotrail.backend.domain.problem.service;
 
 import com.algotrail.backend.domain.category.entity.Category;
 import com.algotrail.backend.domain.category.repository.CategoryRepository;
-import com.algotrail.backend.domain.problem.dto.ProblemDetailResponse;
-import com.algotrail.backend.domain.problem.dto.ProblemListResponse;
-import com.algotrail.backend.domain.problem.dto.ProblemUpdateRequest;
-import com.algotrail.backend.domain.problem.dto.ProblemUpdateResponse;
+import com.algotrail.backend.domain.problem.dto.*;
 import com.algotrail.backend.domain.problem.entity.Problem;
 import com.algotrail.backend.domain.problem.entity.ProblemCategory;
 import com.algotrail.backend.domain.problem.entity.ProblemStatus;
@@ -120,5 +117,30 @@ public class ProblemService {
                     return ProblemListResponse.of(solvedProblem, categories);
                 })
                 .toList();
+    }
+
+    @Transactional
+    public ProblemCategoryUpdateResponse updateProblemCategory(
+            Long solvedProblemId,
+            ProblemCategoryUpdateRequest request
+    ) {
+        SolvedProblem solvedProblem = solvedProblemRepository.findById(solvedProblemId)
+                .orElseThrow(() -> new IllegalArgumentException("풀이 기록을 찾을 수 없습니다."));
+
+        Problem problem = solvedProblem.getProblem();
+
+        Category category = categoryRepository.findByName(request.categoryName())
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 카테고리입니다: " + request.categoryName()));
+
+        problemCategoryRepository.deleteByProblem(problem);
+
+        problemCategoryRepository.save(new ProblemCategory(problem, category));
+
+        return new ProblemCategoryUpdateResponse(
+                solvedProblem.getId(),
+                problem.getId(),
+                category.getName(),
+                "문제 유형이 수정되었습니다."
+        );
     }
 }
