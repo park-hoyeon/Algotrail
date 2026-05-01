@@ -13,6 +13,10 @@ import com.algotrail.backend.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import com.algotrail.backend.domain.category.entity.Category;
+import com.algotrail.backend.domain.category.repository.CategoryRepository;
+import com.algotrail.backend.domain.problem.entity.ProblemCategory;
+import com.algotrail.backend.domain.problem.repository.ProblemCategoryRepository;
 
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -27,6 +31,8 @@ public class GithubSyncService {
     private final ProblemRepository problemRepository;
     private final SolvedProblemRepository solvedProblemRepository;
     private final ReviewScheduleRepository reviewScheduleRepository;
+    private final CategoryRepository categoryRepository;
+    private final ProblemCategoryRepository problemCategoryRepository;
 
     public GithubSyncResponse sync(Long userId) {
         User user = userRepository.findById(userId)
@@ -186,6 +192,8 @@ public class GithubSyncService {
                         )
                 ));
 
+        saveAutoCategory(problem, problemTitle);
+
         if (solvedProblemRepository.existsByUserAndProblem(user, problem)) {
             return 0;
         }
@@ -272,5 +280,64 @@ public class GithubSyncService {
         if (lower.contains("lv.5") || lower.contains("level5")) return "Lv.5";
 
         return levelName;
+    }
+
+    private void saveAutoCategory(Problem problem, String problemTitle) {
+        String categoryName = inferCategoryName(problemTitle);
+
+        Category category = categoryRepository.findByName(categoryName)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 카테고리입니다: " + categoryName));
+
+        boolean alreadyExists = problemCategoryRepository.findByProblem(problem)
+                .stream()
+                .anyMatch(problemCategory ->
+                        problemCategory.getCategory().getId().equals(category.getId())
+                );
+
+        if (!alreadyExists) {
+            problemCategoryRepository.save(new ProblemCategory(problem, category));
+        }
+    }
+
+    private String inferCategoryName(String problemTitle) {
+        String title = problemTitle.toLowerCase();
+
+        if (title.contains("dfs") || title.contains("bfs") || title.contains("네트워크") || title.contains("타겟 넘버")) {
+            return "BFS/DFS";
+        }
+
+        if (title.contains("배달") || title.contains("최단") || title.contains("다익스트라")) {
+            return "최단경로";
+        }
+
+        if (title.contains("해시") || title.contains("완주하지 못한 선수") || title.contains("전화번호")) {
+            return "해시";
+        }
+
+        if (title.contains("스택") || title.contains("큐") || title.contains("기능개발") || title.contains("올바른 괄호")) {
+            return "스택/큐";
+        }
+
+        if (title.contains("정렬") || title.contains("k번째수") || title.contains("가장 큰 수")) {
+            return "정렬";
+        }
+
+        if (title.contains("dp") || title.contains("타일") || title.contains("정수 삼각형")) {
+            return "DP";
+        }
+
+        if (title.contains("그리디") || title.contains("체육복") || title.contains("구명보트")) {
+            return "그리디";
+        }
+
+        if (title.contains("카펫") || title.contains("모의고사") || title.contains("소수 찾기")) {
+            return "완전탐색";
+        }
+
+        if (title.contains("문자열") || title.contains("문자") || title.contains("이상한 문자")) {
+            return "문자열";
+        }
+
+        return "구현";
     }
 }
