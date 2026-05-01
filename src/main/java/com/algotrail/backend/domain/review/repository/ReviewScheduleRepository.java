@@ -18,4 +18,6 @@ public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, 
             LocalDate reviewDate,
             String status
     );
+
+    long countBySolvedProblemUserIdAndStatus(Long userId, String status);
 }
