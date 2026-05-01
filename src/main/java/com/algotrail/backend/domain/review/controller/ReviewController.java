@@ -5,6 +5,8 @@ import com.algotrail.backend.domain.review.dto.ReviewTodayResponse;
 import com.algotrail.backend.domain.review.service.ReviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import com.algotrail.backend.domain.review.dto.ReviewRetryRequest;
+import com.algotrail.backend.domain.review.dto.ReviewRetryResponse;
 
 @RestController
 @RequestMapping("/api/reviews")
@@ -21,5 +23,13 @@ public class ReviewController {
     @PatchMapping("/{reviewScheduleId}/complete")
     public ReviewCompleteResponse completeReview(@PathVariable Long reviewScheduleId) {
         return reviewService.completeReview(reviewScheduleId);
+    }
+
+    @PatchMapping("/{reviewScheduleId}/retry")
+    public ReviewRetryResponse retryReview(
+            @PathVariable Long reviewScheduleId,
+            @RequestBody ReviewRetryRequest request
+    ) {
+        return reviewService.retryReview(reviewScheduleId, request);
     }
 }

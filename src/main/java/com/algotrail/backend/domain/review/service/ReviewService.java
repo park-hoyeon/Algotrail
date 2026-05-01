@@ -6,6 +6,9 @@ import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import com.algotrail.backend.domain.problem.entity.SolvedProblem;
+import com.algotrail.backend.domain.review.dto.ReviewRetryRequest;
+import com.algotrail.backend.domain.review.dto.ReviewRetryResponse;
 
 import java.time.LocalDate;
 
@@ -40,6 +43,35 @@ public class ReviewService {
                 reviewSchedule.getStatus(),
                 reviewSchedule.getCompletedAt(),
                 "복습이 완료되었습니다."
+        );
+    }
+
+    public ReviewRetryResponse retryReview(Long reviewScheduleId, ReviewRetryRequest request) {
+
+        ReviewSchedule reviewSchedule = reviewScheduleRepository.findById(reviewScheduleId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 복습 일정입니다."));
+
+        SolvedProblem solvedProblem = reviewSchedule.getSolvedProblem();
+
+        // 상태 변경
+        solvedProblem.updateStatus("RETRY_REQUIRED");
+
+        // 메모 추가 (기존 메모에 이어붙이기)
+        if (request.memo() != null && !request.memo().isBlank()) {
+            String existingMemo = solvedProblem.getMemo() == null ? "" : solvedProblem.getMemo();
+
+            solvedProblem.updateInfo(
+                    solvedProblem.getStatus(),
+                    solvedProblem.getSolveTimeMinutes(),
+                    existingMemo + "\n[RETRY] " + request.memo()
+            );
+        }
+
+        return new ReviewRetryResponse(
+                reviewSchedule.getId(),
+                solvedProblem.getId(),
+                solvedProblem.getStatus(),
+                "다시 풀기 필요 상태로 변경되었습니다."
         );
     }
 }
