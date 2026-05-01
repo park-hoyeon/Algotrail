@@ -29,4 +29,9 @@ public class User {
         this.githubUsername = githubUsername;
         this.githubRepo = githubRepo;
     }
+
+    public void disconnectGithub() {
+        this.githubUsername = null;
+        this.githubRepo = null;
+    }
 }

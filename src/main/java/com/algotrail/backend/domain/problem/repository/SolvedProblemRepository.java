@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Long> {
@@ -64,4 +65,6 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
     List<LocalDate> findDistinctSolvedDatesByUserIdOrderBySolvedDateDesc(
             @Param("userId") Long userId
     );
+
+
 }

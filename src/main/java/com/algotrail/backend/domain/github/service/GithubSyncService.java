@@ -2,10 +2,7 @@ package com.algotrail.backend.domain.github.service;
 
 import com.algotrail.backend.domain.category.entity.Category;
 import com.algotrail.backend.domain.category.repository.CategoryRepository;
-import com.algotrail.backend.domain.github.dto.GithubCommitResponse;
-import com.algotrail.backend.domain.github.dto.GithubContentResponse;
-import com.algotrail.backend.domain.github.dto.GithubSyncResponse;
-import com.algotrail.backend.domain.github.dto.SyncResult;
+import com.algotrail.backend.domain.github.dto.*;
 import com.algotrail.backend.domain.github.entity.GithubSyncLog;
 import com.algotrail.backend.domain.github.entity.GithubSyncStatus;
 import com.algotrail.backend.domain.github.repository.GithubSyncLogRepository;
@@ -23,6 +20,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriComponentsBuilder;
+import com.algotrail.backend.domain.github.dto.GithubSettingResponse;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
 import java.time.LocalDate;
@@ -464,5 +463,25 @@ public class GithubSyncService {
         }
 
         return "구현";
+    }
+
+    public GithubSettingResponse getGithubSetting(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
+
+        return new GithubSettingResponse(
+                user.getGithubUsername() != null && user.getGithubRepo() != null,
+                user.getGithubUsername(),
+                user.getGithubRepo(),
+                "-"
+        );
+    }
+
+    @Transactional
+    public void disconnectGithub(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
+
+        user.disconnectGithub();
     }
 }

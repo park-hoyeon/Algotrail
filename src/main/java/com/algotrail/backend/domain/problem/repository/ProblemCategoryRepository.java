@@ -14,11 +14,11 @@ public interface ProblemCategoryRepository extends JpaRepository<ProblemCategory
     void deleteByProblem(Problem problem);
 
     @Query("""
-            SELECT pc.category.id, COUNT(sp.id)
-            FROM SolvedProblem sp
-            JOIN ProblemCategory pc ON sp.problem = pc.problem
-            WHERE sp.user.id = :userId
-            GROUP BY pc.category.id
-            """)
+        SELECT pc.category.name, COUNT(sp.id)
+        FROM SolvedProblem sp
+        JOIN ProblemCategory pc ON sp.problem = pc.problem
+        WHERE sp.user.id = :userId
+        GROUP BY pc.category.name
+        """)
     List<Object[]> countSolvedByCategory(Long userId);
 }

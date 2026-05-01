@@ -5,6 +5,7 @@ import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, Long> {
@@ -17,6 +18,13 @@ public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, 
             Long userId,
             LocalDate reviewDate,
             String status
+    );
+
+    List<ReviewSchedule> findBySolvedProblemUserIdAndStatusAndCompletedAtBetween(
+            Long userId,
+            String status,
+            LocalDateTime startDateTime,
+            LocalDateTime endDateTime
     );
 
     long countBySolvedProblemUserIdAndStatus(Long userId, String status);
