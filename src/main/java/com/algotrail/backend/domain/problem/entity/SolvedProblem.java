@@ -25,6 +25,7 @@ public class SolvedProblem {
     @JoinColumn(name = "problem_id")
     private Problem problem;
 
+    @Column(length = 1000)
     private String githubUrl;
 
     private String language;
