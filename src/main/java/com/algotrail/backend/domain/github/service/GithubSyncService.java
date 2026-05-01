@@ -304,6 +304,8 @@ public class GithubSyncService {
                     .encode()
                     .toUri();
 
+            System.out.println("commit uri = " + uri);
+
             GithubCommitResponse[] commits = webClient.get()
                     .uri(uri)
                     .retrieve()
@@ -311,11 +313,11 @@ public class GithubSyncService {
                     .block();
 
             if (commits == null || commits.length == 0) {
-                return LocalDate.now();
+                throw new IllegalStateException("커밋 내역이 없습니다. path=" + problemPath);
             }
 
-            if (commits[0].commit() == null || commits[0].commit().author() == null) {
-                return LocalDate.now();
+            if (commits[0].commit() == null || commits[0].commit().author() == null || commits[0].commit().author().date() == null) {
+                throw new IllegalStateException("커밋 날짜 정보가 없습니다. path=" + problemPath);
             }
 
             return commits[0]
@@ -325,7 +327,7 @@ public class GithubSyncService {
                     .toLocalDate();
 
         } catch (Exception e) {
-            return LocalDate.now();
+            throw new IllegalStateException("GitHub 커밋 날짜 조회 실패: " + problemPath + " / " + e.getMessage(), e);
         }
     }
 
