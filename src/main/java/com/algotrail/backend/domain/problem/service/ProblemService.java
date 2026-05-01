@@ -89,4 +89,36 @@ public class ProblemService {
 
         problemCategoryRepository.saveAll(problemCategories);
     }
+
+    public List<ProblemListResponse> searchProblems(
+            Long userId,
+            String keyword,
+            Long categoryId,
+            String status
+    ) {
+        String trimmedKeyword = null;
+        if (keyword != null && !keyword.isBlank()) {
+            trimmedKeyword = keyword.trim();
+        }
+
+        String trimmedStatus = null;
+        if (status != null && !status.isBlank()) {
+            trimmedStatus = status.trim();
+        }
+
+        return solvedProblemRepository.searchProblems(
+                        userId,
+                        trimmedKeyword,
+                        categoryId,
+                        trimmedStatus
+                )
+                .stream()
+                .map(solvedProblem -> {
+                    List<ProblemCategory> categories =
+                            problemCategoryRepository.findByProblem(solvedProblem.getProblem());
+
+                    return ProblemListResponse.of(solvedProblem, categories);
+                })
+                .toList();
+    }
 }

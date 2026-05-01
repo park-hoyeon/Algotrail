@@ -4,6 +4,8 @@ import com.algotrail.backend.domain.problem.entity.Problem;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.user.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -26,5 +28,29 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
             Long userId,
             LocalDate startDate,
             LocalDate endDate
+    );
+
+    @Query("""
+            SELECT DISTINCT sp
+            FROM SolvedProblem sp
+            JOIN FETCH sp.problem p
+            WHERE sp.user.id = :userId
+              AND (:keyword IS NULL OR p.title LIKE CONCAT('%', :keyword, '%'))
+              AND (:status IS NULL OR sp.status = :status)
+              AND (
+                    :categoryId IS NULL OR EXISTS (
+                        SELECT pc.id
+                        FROM ProblemCategory pc
+                        WHERE pc.problem = p
+                          AND pc.category.id = :categoryId
+                    )
+              )
+            ORDER BY sp.solvedDate DESC
+            """)
+    List<SolvedProblem> searchProblems(
+            @Param("userId") Long userId,
+            @Param("keyword") String keyword,
+            @Param("categoryId") Long categoryId,
+            @Param("status") String status
     );
 }

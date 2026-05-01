@@ -22,6 +22,16 @@ public class ProblemController {
         return problemService.getProblems(userId);
     }
 
+    @GetMapping("/search")
+    public List<ProblemListResponse> searchProblems(
+            @RequestParam Long userId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String status
+    ) {
+        return problemService.searchProblems(userId, keyword, categoryId, status);
+    }
+
     @GetMapping("/{solvedProblemId}")
     public ProblemDetailResponse getProblemDetail(@PathVariable Long solvedProblemId) {
         return problemService.getProblemDetail(solvedProblemId);
