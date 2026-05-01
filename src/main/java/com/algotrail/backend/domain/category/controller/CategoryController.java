@@ -2,8 +2,10 @@ package com.algotrail.backend.domain.category.controller;
 
 import com.algotrail.backend.domain.category.entity.Category;
 import com.algotrail.backend.domain.category.repository.CategoryRepository;
+import com.algotrail.backend.domain.category.service.CategoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import com.algotrail.backend.domain.category.dto.CategoryBackfillResponse;
 
 import java.util.List;
 
@@ -13,6 +15,7 @@ import java.util.List;
 public class CategoryController {
 
     private final CategoryRepository categoryRepository;
+    private final CategoryService categoryService;
 
     @GetMapping
     public List<CategoryResponse> getCategories() {
@@ -34,5 +37,10 @@ public class CategoryController {
                     category.getDescription()
             );
         }
+    }
+
+    @PostMapping("/backfill")
+    public CategoryBackfillResponse backfillProblemCategories() {
+        return categoryService.backfillProblemCategories();
     }
 }
