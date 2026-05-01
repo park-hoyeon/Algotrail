@@ -54,4 +54,14 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
             @Param("categoryId") Long categoryId,
             @Param("status") ProblemStatus status
     );
+
+    @Query("""
+    SELECT DISTINCT sp.solvedDate
+    FROM SolvedProblem sp
+    WHERE sp.user.id = :userId
+    ORDER BY sp.solvedDate DESC
+    """)
+    List<LocalDate> findDistinctSolvedDatesByUserIdOrderBySolvedDateDesc(
+            @Param("userId") Long userId
+    );
 }

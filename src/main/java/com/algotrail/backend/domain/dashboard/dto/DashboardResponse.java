@@ -14,6 +14,8 @@ public record DashboardResponse(
         long todaySolvedCount,
         long reviewCompletedCount,
         int todayCompletionRate,
+        int currentStreak,
+        int maxStreak,
         List<TodayReviewItem> todayReviews,
         List<RecentSolvedItem> recentSolvedProblems,
         LastGithubSyncInfo lastGithubSyncInfo

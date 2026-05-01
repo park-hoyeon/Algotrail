@@ -39,6 +39,12 @@ public class DashboardService {
         List<SolvedProblem> recentSolvedProblems =
                 solvedProblemRepository.findTop5ByUserIdOrderBySolvedDateDesc(userId);
 
+        List<LocalDate> solvedDates =
+                solvedProblemRepository.findDistinctSolvedDatesByUserIdOrderBySolvedDateDesc(userId);
+
+        int currentStreak = calculateCurrentStreak(solvedDates);
+        int maxStreak = calculateMaxStreak(solvedDates);
+
         GithubSyncLog lastSyncLog = githubSyncLogRepository
                 .findTopByUserIdOrderBySyncStartedAtDesc(userId)
                 .orElse(null);
@@ -56,6 +62,8 @@ public class DashboardService {
                 todaySolvedCount,
                 reviewCompletedCount,
                 todayCompletionRate,
+                currentStreak,
+                maxStreak,
                 todayReviews.stream()
                         .map(DashboardResponse.TodayReviewItem::from)
                         .toList(),
@@ -64,5 +72,54 @@ public class DashboardService {
                         .toList(),
                 DashboardResponse.LastGithubSyncInfo.from(lastSyncLog)
         );
+    }
+
+    private int calculateCurrentStreak(List<LocalDate> solvedDates) {
+        if (solvedDates == null || solvedDates.isEmpty()) {
+            return 0;
+        }
+
+        LocalDate today = LocalDate.now();
+        LocalDate cursor = today;
+
+        if (!solvedDates.contains(today)) {
+            cursor = today.minusDays(1);
+        }
+
+        int streak = 0;
+
+        while (solvedDates.contains(cursor)) {
+            streak++;
+            cursor = cursor.minusDays(1);
+        }
+
+        return streak;
+    }
+
+    private int calculateMaxStreak(List<LocalDate> solvedDates) {
+        if (solvedDates == null || solvedDates.isEmpty()) {
+            return 0;
+        }
+
+        List<LocalDate> sortedDates = solvedDates.stream()
+                .sorted()
+                .toList();
+
+        int maxStreak = 1;
+        int currentStreak = 1;
+
+        for (int i = 1; i < sortedDates.size(); i++) {
+            LocalDate previous = sortedDates.get(i - 1);
+            LocalDate current = sortedDates.get(i);
+
+            if (current.equals(previous.plusDays(1))) {
+                currentStreak++;
+                maxStreak = Math.max(maxStreak, currentStreak);
+            } else {
+                currentStreak = 1;
+            }
+        }
+
+        return maxStreak;
     }
 }
