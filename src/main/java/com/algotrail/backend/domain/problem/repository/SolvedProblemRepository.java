@@ -1,6 +1,5 @@
 package com.algotrail.backend.domain.problem.repository;
 
-import com.algotrail.backend.domain.problem.repository.SolvedProblemRepository;
 import com.algotrail.backend.domain.problem.entity.Problem;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.user.entity.User;
@@ -20,4 +19,12 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
     long countByUserIdAndSolvedDate(Long userId, LocalDate solvedDate);
 
     List<SolvedProblem> findTop5ByUserIdOrderBySolvedDateDesc(Long userId);
+
+    List<SolvedProblem> findByUserId(Long userId);
+
+    List<SolvedProblem> findByUserIdAndSolvedDateBetween(
+            Long userId,
+            LocalDate startDate,
+            LocalDate endDate
+    );
 }
