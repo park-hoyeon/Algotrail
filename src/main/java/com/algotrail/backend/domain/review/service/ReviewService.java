@@ -2,16 +2,14 @@ package com.algotrail.backend.domain.review.service;
 
 import com.algotrail.backend.domain.problem.entity.ProblemStatus;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
-import com.algotrail.backend.domain.review.dto.ReviewCompleteResponse;
-import com.algotrail.backend.domain.review.dto.ReviewRetryRequest;
-import com.algotrail.backend.domain.review.dto.ReviewRetryResponse;
-import com.algotrail.backend.domain.review.dto.ReviewTodayResponse;
+import com.algotrail.backend.domain.review.dto.*;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -71,6 +69,45 @@ public class ReviewService {
                 solvedProblem.getId(),
                 solvedProblem.getStatus().name(),
                 "다시 풀기 필요 상태로 변경되었습니다."
+        );
+    }
+
+    public UpcomingReviewResponse getUpcomingReviews(Long userId, int days) {
+        LocalDate startDate = LocalDate.now();
+        LocalDate endDate = startDate.plusDays(days);
+
+        List<ReviewSchedule> schedules =
+                reviewScheduleRepository
+                        .findBySolvedProblemUserIdAndStatusAndReviewDateBetweenOrderByReviewDateAsc(
+                                userId,
+                                "PENDING",
+                                startDate,
+                                endDate
+                        );
+
+        List<UpcomingReviewResponse.UpcomingReviewItem> reviews = schedules.stream()
+                .map(schedule -> {
+                    var solvedProblem = schedule.getSolvedProblem();
+                    var problem = solvedProblem.getProblem();
+
+                    return new UpcomingReviewResponse.UpcomingReviewItem(
+                            schedule.getId(),
+                            solvedProblem.getId(),
+                            problem.getTitle(),
+                            problem.getLevel(),
+                            schedule.getStatus(),
+                            schedule.getReviewRound(),
+                            schedule.getReviewDate(),
+                            solvedProblem.getGithubUrl(),
+                            solvedProblem.getLanguage()
+                    );
+                })
+                .toList();
+
+        return new UpcomingReviewResponse(
+                startDate,
+                endDate,
+                reviews
         );
     }
 }

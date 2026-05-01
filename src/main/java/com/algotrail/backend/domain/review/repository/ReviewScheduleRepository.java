@@ -27,5 +27,12 @@ public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, 
             LocalDateTime endDateTime
     );
 
+    List<ReviewSchedule> findBySolvedProblemUserIdAndStatusAndReviewDateBetweenOrderByReviewDateAsc(
+            Long userId,
+            String status,
+            LocalDate startDate,
+            LocalDate endDate
+    );
+
     long countBySolvedProblemUserIdAndStatus(Long userId, String status);
 }
