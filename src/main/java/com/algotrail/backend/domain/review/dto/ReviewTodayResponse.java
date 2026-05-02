@@ -1,9 +1,8 @@
 package com.algotrail.backend.domain.review.dto;
 
-import com.algotrail.backend.domain.review.entity.ReviewSchedule;
-
 import java.time.LocalDate;
 import java.util.List;
+import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 
 public record ReviewTodayResponse(
         LocalDate today,

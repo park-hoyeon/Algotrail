@@ -9,6 +9,7 @@ import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -17,15 +18,19 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DashboardService {
 
+    private static final int TODAY_GOAL_COUNT = 10;
+
     private final SolvedProblemRepository solvedProblemRepository;
     private final ReviewScheduleRepository reviewScheduleRepository;
     private final GithubSyncLogRepository githubSyncLogRepository;
 
+    @Transactional(readOnly = true)
     public DashboardResponse getDashboard(Long userId) {
         LocalDate today = LocalDate.now();
 
         long totalSolvedCount = solvedProblemRepository.countByUserId(userId);
         long todaySolvedCount = solvedProblemRepository.countByUserIdAndSolvedDate(userId, today);
+
         long reviewCompletedCount =
                 reviewScheduleRepository.countBySolvedProblemUserIdAndStatus(userId, "COMPLETED");
 
@@ -45,23 +50,31 @@ public class DashboardService {
         int currentStreak = calculateCurrentStreak(solvedDates);
         int maxStreak = calculateMaxStreak(solvedDates);
 
+        LocalDate thirtyDaysAgo = today.minusDays(30);
+        Double average = solvedProblemRepository.findAverageSolveTimeMinutesByUserIdAfterDate(
+                userId,
+                thirtyDaysAgo
+        );
+
+        int averageSolveTimeMinutes = average == null ? 0 : (int) Math.round(average);
+
         GithubSyncLog lastSyncLog = githubSyncLogRepository
                 .findTopByUserIdOrderBySyncStartedAtDesc(userId)
                 .orElse(null);
 
-        int totalTodayTasks = (int) (todaySolvedCount + todayReviews.size());
-        int completedTodayTasks = (int) todaySolvedCount;
-
-        int todayCompletionRate = totalTodayTasks == 0
-                ? 0
-                : (int) Math.round((completedTodayTasks * 100.0) / totalTodayTasks);
+        int todayCompletionRate = (int) Math.min(
+                100,
+                Math.round((todaySolvedCount * 100.0) / TODAY_GOAL_COUNT)
+        );
 
         return new DashboardResponse(
                 today,
                 totalSolvedCount,
                 todaySolvedCount,
+                TODAY_GOAL_COUNT,
                 reviewCompletedCount,
                 todayCompletionRate,
+                averageSolveTimeMinutes,
                 currentStreak,
                 maxStreak,
                 todayReviews.stream()
@@ -80,11 +93,7 @@ public class DashboardService {
         }
 
         LocalDate today = LocalDate.now();
-        LocalDate cursor = today;
-
-        if (!solvedDates.contains(today)) {
-            cursor = today.minusDays(1);
-        }
+        LocalDate cursor = solvedDates.contains(today) ? today : today.minusDays(1);
 
         int streak = 0;
 

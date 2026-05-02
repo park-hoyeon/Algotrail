@@ -3,20 +3,48 @@ package com.algotrail.backend.domain.review.repository;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import org.springframework.data.jpa.repository.JpaRepository;
+import java.time.LocalDateTime;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, Long> {
 
-    List<ReviewSchedule> findByReviewDateAndStatus(LocalDate date, String status);
+    boolean existsBySolvedProblemIdAndReviewRound(Long solvedProblemId, int reviewRound);
 
-    List<ReviewSchedule> findBySolvedProblemOrderByReviewRoundAsc(SolvedProblem solvedProblem);
+    List<ReviewSchedule> findByReviewDateAndStatus(
+            LocalDate reviewDate,
+            String status
+    );
 
     List<ReviewSchedule> findBySolvedProblemUserIdAndReviewDateLessThanEqualAndStatusOrderByReviewDateAsc(
             Long userId,
             LocalDate reviewDate,
+            String status
+    );
+
+    List<ReviewSchedule> findBySolvedProblemUserIdAndStatusAndReviewDateBetweenOrderByReviewDateAsc(
+            Long userId,
+            String status,
+            LocalDate startDate,
+            LocalDate endDate
+    );
+
+    List<ReviewSchedule> findBySolvedProblemIdOrderByReviewRoundAsc(
+            Long solvedProblemId
+    );
+
+    List<ReviewSchedule> findBySolvedProblemOrderByReviewRoundAsc(
+            SolvedProblem solvedProblem
+    );
+
+    List<ReviewSchedule> findTop20ByStatusAndReviewDateLessThanEqualOrderByReviewDateAsc(
+            String status,
+            LocalDate reviewDate
+    );
+
+    long countBySolvedProblemUserIdAndStatus(
+            Long userId,
             String status
     );
 
@@ -27,19 +55,8 @@ public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, 
             LocalDateTime endDateTime
     );
 
-    List<ReviewSchedule> findBySolvedProblemUserIdAndStatusAndReviewDateBetweenOrderByReviewDateAsc(
+    List<ReviewSchedule> findBySolvedProblemUserIdAndStatusOrderByCompletedAtDesc(
             Long userId,
-            String status,
-            LocalDate startDate,
-            LocalDate endDate
+            String status
     );
-
-    List<ReviewSchedule> findBySolvedProblemIdOrderByReviewRoundAsc(Long solvedProblemId);
-
-    List<ReviewSchedule> findTop20ByStatusAndReviewDateLessThanEqualOrderByReviewDateAsc(
-            String status,
-            LocalDate reviewDate
-    );
-
-    long countBySolvedProblemUserIdAndStatus(Long userId, String status);
 }

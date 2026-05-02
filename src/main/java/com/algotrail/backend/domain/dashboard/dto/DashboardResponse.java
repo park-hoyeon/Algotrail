@@ -12,8 +12,10 @@ public record DashboardResponse(
         LocalDate today,
         long totalSolvedCount,
         long todaySolvedCount,
+        int todayGoalCount,
         long reviewCompletedCount,
         int todayCompletionRate,
+        int averageSolveTimeMinutes,
         int currentStreak,
         int maxStreak,
         List<TodayReviewItem> todayReviews,
@@ -70,7 +72,7 @@ public record DashboardResponse(
                     solvedProblem.getProblem().getTitle(),
                     solvedProblem.getProblem().getLevel(),
                     solvedProblem.getLanguage(),
-                    solvedProblem.getStatus().name(),
+                    solvedProblem.getStatus() == null ? "SOLVED" : solvedProblem.getStatus().name(),
                     solvedProblem.getSolvedDate(),
                     solvedProblem.getGithubUrl()
             );
@@ -86,16 +88,14 @@ public record DashboardResponse(
             String message
     ) {
         public static LastGithubSyncInfo from(GithubSyncLog log) {
-            if (log == null) {
-                return null;
-            }
+            if (log == null) return null;
 
             return new LastGithubSyncInfo(
                     log.getSyncStartedAt(),
                     log.getSyncFinishedAt(),
                     log.getAddedCount(),
                     log.getSkippedCount(),
-                    log.getStatus().name(),
+                    log.getStatus() == null ? "UNKNOWN" : log.getStatus().name(),
                     log.getMessage()
             );
         }

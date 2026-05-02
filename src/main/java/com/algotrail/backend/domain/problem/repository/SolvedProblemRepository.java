@@ -66,5 +66,17 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
             @Param("userId") Long userId
     );
 
+    @Query("""
+        select avg(sp.solveTimeMinutes)
+        from SolvedProblem sp
+        where sp.user.id = :userId
+        and sp.solvedDate >= :startDate
+        and sp.solveTimeMinutes is not null
+        """)
+    Double findAverageSolveTimeMinutesByUserIdAfterDate(
+            @Param("userId") Long userId,
+            @Param("startDate") LocalDate startDate
+    );
+
 
 }
