@@ -52,6 +52,7 @@ public record DashboardResponse(
                 case 1 -> "3일차 복습";
                 case 2 -> "7일차 복습";
                 case 3 -> "14일차 복습";
+                case 4 -> "30일차 복습";
                 default -> reviewRound + "차 복습";
             };
         }

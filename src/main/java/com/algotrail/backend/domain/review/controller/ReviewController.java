@@ -1,10 +1,12 @@
 package com.algotrail.backend.domain.review.controller;
 
 import com.algotrail.backend.domain.review.dto.*;
+import com.algotrail.backend.domain.review.service.ReviewScheduleService;
 import com.algotrail.backend.domain.review.service.ReviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -13,10 +15,33 @@ import java.util.List;
 public class ReviewController {
 
     private final ReviewService reviewService;
+    private final ReviewScheduleService reviewScheduleService;
 
     @GetMapping("/today")
     public ReviewTodayResponse getTodayReviews(@RequestParam Long userId) {
-        return reviewService.getTodayReviews(userId);
+        return ReviewTodayResponse.of(
+                LocalDate.now(),
+                reviewScheduleService.getTodayReviews(userId)
+        );
+    }
+
+    @GetMapping("/upcoming")
+    public ReviewTodayResponse getUpcomingReviews(
+            @RequestParam Long userId,
+            @RequestParam(defaultValue = "7") int days
+    ) {
+        return ReviewTodayResponse.of(
+                LocalDate.now(),
+                reviewScheduleService.getUpcomingReviews(userId, days)
+        );
+    }
+
+    @GetMapping("/completed")
+    public ReviewTodayResponse getCompletedReviews(@RequestParam Long userId) {
+        return ReviewTodayResponse.of(
+                LocalDate.now(),
+                reviewScheduleService.getCompletedReviews(userId)
+        );
     }
 
     @PatchMapping("/{reviewScheduleId}/complete")
@@ -30,14 +55,6 @@ public class ReviewController {
             @RequestBody ReviewRetryRequest request
     ) {
         return reviewService.retryReview(reviewScheduleId, request);
-    }
-
-    @GetMapping("/upcoming")
-    public UpcomingReviewResponse getUpcomingReviews(
-            @RequestParam Long userId,
-            @RequestParam(defaultValue = "7") int days
-    ) {
-        return reviewService.getUpcomingReviews(userId, days);
     }
 
     @GetMapping("/problem/{solvedProblemId}")

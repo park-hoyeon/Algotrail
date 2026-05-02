@@ -1,11 +1,9 @@
 package com.algotrail.backend.domain.review.controller;
 
-import com.algotrail.backend.domain.review.dto.ReviewTodayResponse;
 import com.algotrail.backend.domain.review.service.ReviewScheduleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
 import java.util.Map;
 
 @RestController
@@ -22,14 +20,6 @@ public class ReviewScheduleController {
         return Map.of(
                 "message", "기존 풀이 문제 복습 일정 생성 완료",
                 "createdCount", createdCount
-        );
-    }
-
-    @GetMapping("/completed")
-    public ReviewTodayResponse getCompletedReviews(@RequestParam Long userId) {
-        return ReviewTodayResponse.of(
-                LocalDate.now(),
-                reviewScheduleService.getCompletedReviews(userId)
         );
     }
 }

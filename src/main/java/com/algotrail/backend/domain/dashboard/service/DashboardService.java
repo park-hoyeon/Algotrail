@@ -26,41 +26,55 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public DashboardResponse getDashboard(Long userId) {
+
         LocalDate today = LocalDate.now();
 
-        long totalSolvedCount = solvedProblemRepository.countByUserId(userId);
-        long todaySolvedCount = solvedProblemRepository.countByUserIdAndSolvedDate(userId, today);
+        long totalSolvedCount =
+                solvedProblemRepository.countByUserId(userId);
+
+        long todaySolvedCount =
+                solvedProblemRepository.countByUserIdAndSolvedDate(userId, today);
 
         long reviewCompletedCount =
-                reviewScheduleRepository.countBySolvedProblemUserIdAndStatus(userId, "COMPLETED");
+                reviewScheduleRepository.countBySolvedProblemUserIdAndStatus(
+                        userId,
+                        "COMPLETED"
+                );
 
         List<ReviewSchedule> todayReviews =
-                reviewScheduleRepository.findBySolvedProblemUserIdAndReviewDateLessThanEqualAndStatusOrderByReviewDateAsc(
-                        userId,
-                        today,
-                        "PENDING"
-                );
+                reviewScheduleRepository
+                        .findBySolvedProblemUserIdAndReviewDateLessThanEqualAndStatusOrderByReviewDateAsc(
+                                userId,
+                                today,
+                                "PENDING"
+                        );
 
         List<SolvedProblem> recentSolvedProblems =
                 solvedProblemRepository.findTop5ByUserIdOrderBySolvedDateDesc(userId);
 
+        // ✅ 안전한 streak 계산 (문제 풀이 기준)
         List<LocalDate> solvedDates =
-                solvedProblemRepository.findDistinctSolvedDatesByUserIdOrderBySolvedDateDesc(userId);
+                solvedProblemRepository
+                        .findDistinctSolvedDatesByUserIdOrderBySolvedDateDesc(userId);
 
         int currentStreak = calculateCurrentStreak(solvedDates);
         int maxStreak = calculateMaxStreak(solvedDates);
 
+        // 평균 풀이 시간
         LocalDate thirtyDaysAgo = today.minusDays(30);
-        Double average = solvedProblemRepository.findAverageSolveTimeMinutesByUserIdAfterDate(
-                userId,
-                thirtyDaysAgo
-        );
 
-        int averageSolveTimeMinutes = average == null ? 0 : (int) Math.round(average);
+        Double average =
+                solvedProblemRepository
+                        .findAverageSolveTimeMinutesByUserIdAfterDate(userId, thirtyDaysAgo);
 
-        GithubSyncLog lastSyncLog = githubSyncLogRepository
-                .findTopByUserIdOrderBySyncStartedAtDesc(userId)
-                .orElse(null);
+        int averageSolveTimeMinutes =
+                average == null ? 0 : (int) Math.round(average);
+
+        // GitHub sync
+        GithubSyncLog lastSyncLog =
+                githubSyncLogRepository
+                        .findTopByUserIdOrderBySyncStartedAtDesc(userId)
+                        .orElse(null);
 
         int todayCompletionRate = (int) Math.min(
                 100,
@@ -87,13 +101,21 @@ public class DashboardService {
         );
     }
 
+    // =========================
+    // 현재 연속 학습
+    // =========================
     private int calculateCurrentStreak(List<LocalDate> solvedDates) {
+
         if (solvedDates == null || solvedDates.isEmpty()) {
             return 0;
         }
 
         LocalDate today = LocalDate.now();
-        LocalDate cursor = solvedDates.contains(today) ? today : today.minusDays(1);
+
+        LocalDate cursor =
+                solvedDates.contains(today)
+                        ? today
+                        : today.minusDays(1);
 
         int streak = 0;
 
@@ -105,7 +127,11 @@ public class DashboardService {
         return streak;
     }
 
+    // =========================
+    // 최대 연속 학습
+    // =========================
     private int calculateMaxStreak(List<LocalDate> solvedDates) {
+
         if (solvedDates == null || solvedDates.isEmpty()) {
             return 0;
         }
@@ -118,10 +144,11 @@ public class DashboardService {
         int currentStreak = 1;
 
         for (int i = 1; i < sortedDates.size(); i++) {
-            LocalDate previous = sortedDates.get(i - 1);
-            LocalDate current = sortedDates.get(i);
 
-            if (current.equals(previous.plusDays(1))) {
+            LocalDate prev = sortedDates.get(i - 1);
+            LocalDate curr = sortedDates.get(i);
+
+            if (curr.equals(prev.plusDays(1))) {
                 currentStreak++;
                 maxStreak = Math.max(maxStreak, currentStreak);
             } else {

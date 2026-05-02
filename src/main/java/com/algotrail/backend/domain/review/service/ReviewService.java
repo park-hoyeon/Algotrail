@@ -7,6 +7,7 @@ import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -30,27 +31,12 @@ public class ReviewService {
         return ReviewTodayResponse.of(today, reviews);
     }
 
+    @Transactional
     public void completeReview(Long reviewScheduleId) {
         ReviewSchedule schedule = reviewScheduleRepository.findById(reviewScheduleId)
                 .orElseThrow(() -> new IllegalArgumentException("복습 일정을 찾을 수 없습니다."));
 
         schedule.complete();
-
-        int nextRound = schedule.getReviewRound() + 1;
-
-        if (nextRound <= 3) {
-            int nextDays = switch (nextRound) {
-                case 2 -> 7;
-                case 3 -> 14;
-                default -> throw new IllegalStateException("잘못된 복습 회차입니다.");
-            };
-
-            reviewScheduleRepository.save(new ReviewSchedule(
-                    schedule.getSolvedProblem(),
-                    nextRound,
-                    schedule.getSolvedProblem().getSolvedDate().plusDays(nextDays)
-            ));
-        }
     }
 
     public ReviewRetryResponse retryReview(Long reviewScheduleId, ReviewRetryRequest request) {
@@ -62,7 +48,7 @@ public class ReviewService {
 
         solvedProblem.updateStatus(ProblemStatus.RETRY);
 
-        if (request.memo() != null && !request.memo().isBlank()) {
+        if (request != null && request.memo() != null && !request.memo().isBlank()) {
             String existingMemo = solvedProblem.getMemo() == null ? "" : solvedProblem.getMemo();
 
             solvedProblem.updateInfo(

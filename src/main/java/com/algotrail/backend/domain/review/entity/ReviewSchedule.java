@@ -40,4 +40,9 @@ public class ReviewSchedule {
         this.status = "COMPLETED";
         this.completedAt = LocalDateTime.now();
     }
+
+    public void retry() {
+        this.status = "PENDING";
+        this.completedAt = null;
+    }
 }
