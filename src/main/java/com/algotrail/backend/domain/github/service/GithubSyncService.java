@@ -3,8 +3,10 @@ package com.algotrail.backend.domain.github.service;
 import com.algotrail.backend.domain.category.entity.Category;
 import com.algotrail.backend.domain.category.repository.CategoryRepository;
 import com.algotrail.backend.domain.github.dto.*;
+import com.algotrail.backend.domain.github.entity.GithubRepository;
 import com.algotrail.backend.domain.github.entity.GithubSyncLog;
 import com.algotrail.backend.domain.github.entity.GithubSyncStatus;
+import com.algotrail.backend.domain.github.repository.GithubRepositoryRepository;
 import com.algotrail.backend.domain.github.repository.GithubSyncLogRepository;
 import com.algotrail.backend.domain.problem.entity.Problem;
 import com.algotrail.backend.domain.problem.entity.ProblemCategory;
@@ -40,7 +42,9 @@ public class GithubSyncService {
     private final CategoryRepository categoryRepository;
     private final ProblemCategoryRepository problemCategoryRepository;
     private final GithubSyncLogRepository githubSyncLogRepository;
+    private final GithubRepositoryRepository githubRepositoryRepository;
 
+    @Transactional
     public GithubSyncResponse sync(Long userId) {
         LocalDateTime startedAt = LocalDateTime.now();
 
@@ -48,11 +52,14 @@ public class GithubSyncService {
             User user = userRepository.findById(userId)
                     .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
 
-            String url = "https://api.github.com/repos/"
-                    + user.getGithubUsername()
-                    + "/"
-                    + user.getGithubRepo()
-                    + "/contents";
+            GithubRepository connectedRepository = githubRepositoryRepository.findByUserId(userId)
+                    .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
+
+            String url = buildContentsUrl(
+                    connectedRepository.getGithubUsername(),
+                    connectedRepository.getRepositoryName(),
+                    null
+            );
 
             GithubContentResponse[] contents = webClient.get()
                     .uri(url)
@@ -64,15 +71,7 @@ public class GithubSyncService {
                 LocalDateTime finishedAt = LocalDateTime.now();
                 String message = "GitHub 저장소에서 파일을 가져오지 못했습니다.";
 
-                githubSyncLogRepository.save(new GithubSyncLog(
-                        userId,
-                        startedAt,
-                        finishedAt,
-                        0,
-                        0,
-                        GithubSyncStatus.FAILED,
-                        message
-                ));
+                saveSyncLog(userId, startedAt, finishedAt, 0, 0, GithubSyncStatus.FAILED, message);
 
                 return new GithubSyncResponse(
                         userId,
@@ -85,16 +84,15 @@ public class GithubSyncService {
                 );
             }
 
-            SyncResult totalResult = SyncResult.none();
+            String rootPath = connectedRepository.getRootPath();
 
-            for (GithubContentResponse content : contents) {
-                if (!isProgrammersDirectory(content)) {
-                    continue;
-                }
+            SyncResult totalResult = syncRootDirectory(
+                    user,
+                    connectedRepository,
+                    rootPath == null ? "" : rootPath
+            );
 
-                SyncResult result = syncProgrammersDirectory(user, content.path());
-                totalResult = totalResult.plus(result);
-            }
+
 
             int newSolvedCount = totalResult.addedCount();
             int skippedCount = totalResult.skippedCount();
@@ -106,7 +104,9 @@ public class GithubSyncService {
                     + skippedCount
                     + "개는 건너뛰었습니다.";
 
-            githubSyncLogRepository.save(new GithubSyncLog(
+            connectedRepository.updateLastSyncedAt();
+
+            saveSyncLog(
                     userId,
                     startedAt,
                     finishedAt,
@@ -114,7 +114,7 @@ public class GithubSyncService {
                     skippedCount,
                     GithubSyncStatus.SUCCESS,
                     message
-            ));
+            );
 
             return new GithubSyncResponse(
                     userId,
@@ -130,15 +130,7 @@ public class GithubSyncService {
             LocalDateTime finishedAt = LocalDateTime.now();
             String message = "GitHub 동기화 중 오류가 발생했습니다: " + e.getMessage();
 
-            githubSyncLogRepository.save(new GithubSyncLog(
-                    userId,
-                    startedAt,
-                    finishedAt,
-                    0,
-                    0,
-                    GithubSyncStatus.FAILED,
-                    message
-            ));
+            saveSyncLog(userId, startedAt, finishedAt, 0, 0, GithubSyncStatus.FAILED, message);
 
             return new GithubSyncResponse(
                     userId,
@@ -152,13 +144,188 @@ public class GithubSyncService {
         }
     }
 
-    private SyncResult syncProgrammersDirectory(User user, String programmersPath) {
-        String url = "https://api.github.com/repos/"
-                + user.getGithubUsername()
-                + "/"
-                + user.getGithubRepo()
-                + "/contents/"
-                + programmersPath;
+    private SyncResult syncRootDirectory(
+            User user,
+            GithubRepository connectedRepository,
+            String rootPath
+    ) {
+        String url = buildContentsUrl(
+                connectedRepository.getGithubUsername(),
+                connectedRepository.getRepositoryName(),
+                rootPath
+        );
+
+        GithubContentResponse[] contents = webClient.get()
+                .uri(url)
+                .retrieve()
+                .bodyToMono(GithubContentResponse[].class)
+                .block();
+
+        if (contents == null) {
+            return SyncResult.none();
+        }
+
+        SyncResult totalResult = SyncResult.none();
+
+        for (GithubContentResponse content : contents) {
+            if ("dir".equals(content.type())) {
+                SyncResult result = syncGenericDirectory(
+                        user,
+                        connectedRepository,
+                        content.path()
+                );
+
+                totalResult = totalResult.plus(result);
+            }
+
+            if ("file".equals(content.type()) && isCodeFile(content.name())) {
+                SyncResult result = syncCodeFile(
+                        user,
+                        connectedRepository,
+                        content,
+                        rootPath
+                );
+
+                totalResult = totalResult.plus(result);
+            }
+        }
+
+        return totalResult;
+    }
+
+    private SyncResult syncGenericDirectory(
+            User user,
+            GithubRepository connectedRepository,
+            String directoryPath
+    ) {
+        String url = buildContentsUrl(
+                connectedRepository.getGithubUsername(),
+                connectedRepository.getRepositoryName(),
+                directoryPath
+        );
+
+        GithubContentResponse[] contents = webClient.get()
+                .uri(url)
+                .retrieve()
+                .bodyToMono(GithubContentResponse[].class)
+                .block();
+
+        if (contents == null) {
+            return SyncResult.none();
+        }
+
+        List<GithubContentResponse> codeFiles = Arrays.stream(contents)
+                .filter(file -> "file".equals(file.type()))
+                .filter(file -> isCodeFile(file.name()))
+                .toList();
+
+        SyncResult totalResult = SyncResult.none();
+
+        if (!codeFiles.isEmpty()) {
+            GithubContentResponse codeFile = codeFiles.get(0);
+
+            SyncResult result = syncCodeFile(
+                    user,
+                    connectedRepository,
+                    codeFile,
+                    directoryPath
+            );
+
+            totalResult = totalResult.plus(result);
+        }
+
+        for (GithubContentResponse content : contents) {
+            if ("dir".equals(content.type())) {
+                SyncResult result = syncGenericDirectory(
+                        user,
+                        connectedRepository,
+                        content.path()
+                );
+
+                totalResult = totalResult.plus(result);
+            }
+        }
+
+        return totalResult;
+    }
+
+    private SyncResult syncCodeFile(
+            User user,
+            GithubRepository connectedRepository,
+            GithubContentResponse codeFile,
+            String path
+    ) {
+        String problemTitle = parseTitleFromPath(path);
+        Long problemNumber = parseProblemNumber(problemTitle);
+
+        if (problemNumber == null) {
+            System.out.println("❌ 문제번호 파싱 실패: " + problemTitle);
+            return SyncResult.skipped();
+        }
+
+        String normalizedTitle = normalizeProblemTitle(parseProblemTitle(problemTitle));
+
+        Problem problem = problemRepository.findByPlatformAndProblemNumber("CUSTOM", problemNumber)
+                .orElseGet(() -> problemRepository.save(
+                        new Problem(
+                                "CUSTOM",
+                                problemNumber,
+                                normalizedTitle,
+                                "미분류",
+                                null
+                        )
+                ));
+
+        saveAutoCategory(problem, normalizedTitle);
+
+        if (solvedProblemRepository.existsByUserAndProblem(user, problem)) {
+            return SyncResult.skipped();
+        }
+
+        LocalDate solvedDate = fetchLatestCommitDate(
+                connectedRepository,
+                codeFile.path()
+        );
+
+        SolvedProblem solvedProblem = solvedProblemRepository.save(
+                new SolvedProblem(
+                        user,
+                        problem,
+                        codeFile.html_url(),
+                        detectLanguage(codeFile.name()),
+                        solvedDate
+                )
+        );
+
+        createFirstReviewSchedule(solvedProblem);
+
+        return SyncResult.added();
+    }
+
+    private String parseTitleFromPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+
+        String[] tokens = path.split("/");
+
+        if (tokens.length == 0) {
+            return path;
+        }
+
+        return tokens[tokens.length - 1];
+    }
+
+    private SyncResult syncProgrammersDirectory(
+            User user,
+            GithubRepository connectedRepository,
+            String programmersPath
+    ) {
+        String url = buildContentsUrl(
+                connectedRepository.getGithubUsername(),
+                connectedRepository.getRepositoryName(),
+                programmersPath
+        );
 
         GithubContentResponse[] levelDirs = webClient.get()
                 .uri(url)
@@ -179,6 +346,7 @@ public class GithubSyncService {
 
             SyncResult result = syncLevelDirectory(
                     user,
+                    connectedRepository,
                     levelDir.path(),
                     levelDir.name()
             );
@@ -189,13 +357,17 @@ public class GithubSyncService {
         return totalResult;
     }
 
-    private SyncResult syncLevelDirectory(User user, String levelPath, String levelName) {
-        String url = "https://api.github.com/repos/"
-                + user.getGithubUsername()
-                + "/"
-                + user.getGithubRepo()
-                + "/contents/"
-                + levelPath;
+    private SyncResult syncLevelDirectory(
+            User user,
+            GithubRepository connectedRepository,
+            String levelPath,
+            String levelName
+    ) {
+        String url = buildContentsUrl(
+                connectedRepository.getGithubUsername(),
+                connectedRepository.getRepositoryName(),
+                levelPath
+        );
 
         GithubContentResponse[] problemDirs = webClient.get()
                 .uri(url)
@@ -216,6 +388,7 @@ public class GithubSyncService {
 
             SyncResult result = syncProblemDirectory(
                     user,
+                    connectedRepository,
                     problemDir.path(),
                     normalizeLevel(levelName),
                     parseProblemTitle(problemDir.name()),
@@ -228,34 +401,26 @@ public class GithubSyncService {
         return totalResult;
     }
 
-    private Long parseProblemNumber(String directoryName) {
-        try {
-            if (directoryName.contains(".")) {
-                return Long.parseLong(directoryName.substring(0, directoryName.indexOf(".")).trim());
-            }
-
-            String firstToken = directoryName.split(" ")[0].trim();
-            return Long.parseLong(firstToken);
-
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private SyncResult syncProblemDirectory(User user, String problemPath, String levelName, String problemTitle, Long problemNumber) {
-        String url = "https://api.github.com/repos/"
-                + user.getGithubUsername()
-                + "/"
-                + user.getGithubRepo()
-                + "/contents/"
-                + problemPath;
-
+    private SyncResult syncProblemDirectory(
+            User user,
+            GithubRepository connectedRepository,
+            String problemPath,
+            String levelName,
+            String problemTitle,
+            Long problemNumber
+    ) {
         System.out.println("problemNumber = " + problemNumber + ", title = " + problemTitle);
 
         if (problemNumber == null) {
             System.out.println("❌ 문제번호 파싱 실패: " + problemTitle);
             return SyncResult.skipped();
         }
+
+        String url = buildContentsUrl(
+                connectedRepository.getGithubUsername(),
+                connectedRepository.getRepositoryName(),
+                problemPath
+        );
 
         GithubContentResponse[] files = webClient.get()
                 .uri(url)
@@ -265,11 +430,6 @@ public class GithubSyncService {
 
         if (files == null) {
             return SyncResult.none();
-        }
-
-        if (problemNumber == null) {
-            System.out.println("문제 번호 파싱 실패: " + problemTitle);
-            return SyncResult.skipped();
         }
 
         List<GithubContentResponse> codeFiles = Arrays.stream(files)
@@ -298,12 +458,14 @@ public class GithubSyncService {
 
         saveAutoCategory(problem, normalizedTitle);
 
-
         if (solvedProblemRepository.existsByUserAndProblem(user, problem)) {
             return SyncResult.skipped();
         }
 
-        LocalDate solvedDate = fetchLatestCommitDate(user, problemPath);
+        LocalDate solvedDate = fetchLatestCommitDate(
+                connectedRepository,
+                problemPath
+        );
 
         SolvedProblem solvedProblem = solvedProblemRepository.save(
                 new SolvedProblem(
@@ -320,23 +482,16 @@ public class GithubSyncService {
         return SyncResult.added();
     }
 
-    private void createFirstReviewSchedule(SolvedProblem solvedProblem) {
-        LocalDate solvedDate = solvedProblem.getSolvedDate();
-
-        reviewScheduleRepository.save(new ReviewSchedule(
-                solvedProblem,
-                1,
-                solvedDate.plusDays(3)
-        ));
-    }
-
-    private LocalDate fetchLatestCommitDate(User user, String problemPath) {
+    private LocalDate fetchLatestCommitDate(
+            GithubRepository connectedRepository,
+            String problemPath
+    ) {
         try {
             URI uri = UriComponentsBuilder
                     .fromUriString("https://api.github.com/repos/"
-                            + user.getGithubUsername()
+                            + connectedRepository.getGithubUsername()
                             + "/"
-                            + user.getGithubRepo()
+                            + connectedRepository.getRepositoryName()
                             + "/commits")
                     .queryParam("path", problemPath)
                     .queryParam("per_page", 1)
@@ -373,7 +528,41 @@ public class GithubSyncService {
         }
     }
 
-    private void createReviewSchedules(SolvedProblem solvedProblem) {
+    private String buildContentsUrl(String githubUsername, String repositoryName, String path) {
+        String baseUrl = "https://api.github.com/repos/"
+                + githubUsername
+                + "/"
+                + repositoryName
+                + "/contents";
+
+        if (path == null || path.isBlank()) {
+            return baseUrl;
+        }
+
+        return baseUrl + "/" + path;
+    }
+
+    private void saveSyncLog(
+            Long userId,
+            LocalDateTime startedAt,
+            LocalDateTime finishedAt,
+            int newSolvedCount,
+            int skippedCount,
+            GithubSyncStatus status,
+            String message
+    ) {
+        githubSyncLogRepository.save(new GithubSyncLog(
+                userId,
+                startedAt,
+                finishedAt,
+                newSolvedCount,
+                skippedCount,
+                status,
+                message
+        ));
+    }
+
+    private void createFirstReviewSchedule(SolvedProblem solvedProblem) {
         LocalDate solvedDate = solvedProblem.getSolvedDate();
 
         reviewScheduleRepository.save(new ReviewSchedule(
@@ -381,18 +570,20 @@ public class GithubSyncService {
                 1,
                 solvedDate.plusDays(3)
         ));
+    }
 
-        reviewScheduleRepository.save(new ReviewSchedule(
-                solvedProblem,
-                2,
-                solvedDate.plusDays(7)
-        ));
+    private Long parseProblemNumber(String directoryName) {
+        try {
+            if (directoryName.contains(".")) {
+                return Long.parseLong(directoryName.substring(0, directoryName.indexOf(".")).trim());
+            }
 
-        reviewScheduleRepository.save(new ReviewSchedule(
-                solvedProblem,
-                3,
-                solvedDate.plusDays(14)
-        ));
+            String firstToken = directoryName.split(" ")[0].trim();
+            return Long.parseLong(firstToken);
+
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String parseProblemTitle(String directoryName) {
@@ -520,25 +711,35 @@ public class GithubSyncService {
         return "구현";
     }
 
+    @Transactional(readOnly = true)
     public GithubSettingResponse getGithubSetting(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
+        GithubRepository connectedRepository = githubRepositoryRepository.findByUserId(userId)
+                .orElse(null);
+
+        if (connectedRepository == null) {
+            return new GithubSettingResponse(
+                    false,
+                    null,
+                    null,
+                    "-"
+            );
+        }
 
         return new GithubSettingResponse(
-                user.getGithubUsername() != null && user.getGithubRepo() != null,
-                user.getGithubUsername(),
-                user.getGithubRepo(),
-                "-"
+                connectedRepository.isConnected(),
+                connectedRepository.getGithubUsername(),
+                connectedRepository.getRepositoryName(),
+                connectedRepository.getLastSyncedAt() == null
+                        ? "-"
+                        : connectedRepository.getLastSyncedAt().toString()
         );
     }
 
     @Transactional
     public void disconnectGithub(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
+        GithubRepository connectedRepository = githubRepositoryRepository.findByUserId(userId)
+                .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
 
-        user.disconnectGithub();
+        githubRepositoryRepository.delete(connectedRepository);
     }
-
-
 }
