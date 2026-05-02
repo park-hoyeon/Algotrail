@@ -55,35 +55,6 @@ public class GithubSyncService {
             GithubRepository connectedRepository = githubRepositoryRepository.findByUserId(userId)
                     .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
 
-            String url = buildContentsUrl(
-                    connectedRepository.getGithubUsername(),
-                    connectedRepository.getRepositoryName(),
-                    null
-            );
-
-            GithubContentResponse[] contents = webClient.get()
-                    .uri(url)
-                    .retrieve()
-                    .bodyToMono(GithubContentResponse[].class)
-                    .block();
-
-            if (contents == null) {
-                LocalDateTime finishedAt = LocalDateTime.now();
-                String message = "GitHub 저장소에서 파일을 가져오지 못했습니다.";
-
-                saveSyncLog(userId, startedAt, finishedAt, 0, 0, GithubSyncStatus.FAILED, message);
-
-                return new GithubSyncResponse(
-                        userId,
-                        0,
-                        0,
-                        startedAt,
-                        finishedAt,
-                        "FAILED",
-                        message
-                );
-            }
-
             String rootPath = connectedRepository.getRootPath();
 
             SyncResult totalResult = syncRootDirectory(
@@ -91,8 +62,6 @@ public class GithubSyncService {
                     connectedRepository,
                     rootPath == null ? "" : rootPath
             );
-
-
 
             int newSolvedCount = totalResult.addedCount();
             int skippedCount = totalResult.skippedCount();
@@ -265,207 +234,31 @@ public class GithubSyncService {
 
         String normalizedTitle = normalizeProblemTitle(parseProblemTitle(problemTitle));
 
-        Problem problem = problemRepository.findByPlatformAndProblemNumber("CUSTOM", problemNumber)
+        String platform = inferPlatformFromPath(path);
+        String level = inferLevelFromPath(path);
+
+        if (solvedProblemRepository.existsByUserIdAndProblemPlatformAndProblemProblemNumber(
+                user.getId(),
+                platform,
+                problemNumber
+        )) {
+            return SyncResult.skipped();
+        }
+
+        Problem problem = problemRepository.findByPlatformAndProblemNumber(platform, problemNumber)
                 .orElseGet(() -> problemRepository.save(
                         new Problem(
-                                "CUSTOM",
+                                platform,
                                 problemNumber,
                                 normalizedTitle,
-                                "미분류",
+                                level,
                                 null
                         )
                 ));
 
         saveAutoCategory(problem, normalizedTitle);
 
-        if (solvedProblemRepository.existsByUserAndProblem(user, problem)) {
-            return SyncResult.skipped();
-        }
-
-        LocalDate solvedDate = fetchLatestCommitDate(
-                connectedRepository,
-                codeFile.path()
-        );
-
-        SolvedProblem solvedProblem = solvedProblemRepository.save(
-                new SolvedProblem(
-                        user,
-                        problem,
-                        codeFile.html_url(),
-                        detectLanguage(codeFile.name()),
-                        solvedDate
-                )
-        );
-
-        createFirstReviewSchedule(solvedProblem);
-
-        return SyncResult.added();
-    }
-
-    private String parseTitleFromPath(String path) {
-        if (path == null || path.isBlank()) {
-            return "";
-        }
-
-        String[] tokens = path.split("/");
-
-        if (tokens.length == 0) {
-            return path;
-        }
-
-        return tokens[tokens.length - 1];
-    }
-
-    private SyncResult syncProgrammersDirectory(
-            User user,
-            GithubRepository connectedRepository,
-            String programmersPath
-    ) {
-        String url = buildContentsUrl(
-                connectedRepository.getGithubUsername(),
-                connectedRepository.getRepositoryName(),
-                programmersPath
-        );
-
-        GithubContentResponse[] levelDirs = webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToMono(GithubContentResponse[].class)
-                .block();
-
-        if (levelDirs == null) {
-            return SyncResult.none();
-        }
-
-        SyncResult totalResult = SyncResult.none();
-
-        for (GithubContentResponse levelDir : levelDirs) {
-            if (!"dir".equals(levelDir.type())) {
-                continue;
-            }
-
-            SyncResult result = syncLevelDirectory(
-                    user,
-                    connectedRepository,
-                    levelDir.path(),
-                    levelDir.name()
-            );
-
-            totalResult = totalResult.plus(result);
-        }
-
-        return totalResult;
-    }
-
-    private SyncResult syncLevelDirectory(
-            User user,
-            GithubRepository connectedRepository,
-            String levelPath,
-            String levelName
-    ) {
-        String url = buildContentsUrl(
-                connectedRepository.getGithubUsername(),
-                connectedRepository.getRepositoryName(),
-                levelPath
-        );
-
-        GithubContentResponse[] problemDirs = webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToMono(GithubContentResponse[].class)
-                .block();
-
-        if (problemDirs == null) {
-            return SyncResult.none();
-        }
-
-        SyncResult totalResult = SyncResult.none();
-
-        for (GithubContentResponse problemDir : problemDirs) {
-            if (!"dir".equals(problemDir.type())) {
-                continue;
-            }
-
-            SyncResult result = syncProblemDirectory(
-                    user,
-                    connectedRepository,
-                    problemDir.path(),
-                    normalizeLevel(levelName),
-                    parseProblemTitle(problemDir.name()),
-                    parseProblemNumber(problemDir.name())
-            );
-
-            totalResult = totalResult.plus(result);
-        }
-
-        return totalResult;
-    }
-
-    private SyncResult syncProblemDirectory(
-            User user,
-            GithubRepository connectedRepository,
-            String problemPath,
-            String levelName,
-            String problemTitle,
-            Long problemNumber
-    ) {
-        System.out.println("problemNumber = " + problemNumber + ", title = " + problemTitle);
-
-        if (problemNumber == null) {
-            System.out.println("❌ 문제번호 파싱 실패: " + problemTitle);
-            return SyncResult.skipped();
-        }
-
-        String url = buildContentsUrl(
-                connectedRepository.getGithubUsername(),
-                connectedRepository.getRepositoryName(),
-                problemPath
-        );
-
-        GithubContentResponse[] files = webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToMono(GithubContentResponse[].class)
-                .block();
-
-        if (files == null) {
-            return SyncResult.none();
-        }
-
-        List<GithubContentResponse> codeFiles = Arrays.stream(files)
-                .filter(file -> "file".equals(file.type()))
-                .filter(file -> isCodeFile(file.name()))
-                .toList();
-
-        if (codeFiles.isEmpty()) {
-            return SyncResult.none();
-        }
-
-        GithubContentResponse codeFile = codeFiles.get(0);
-
-        String normalizedTitle = normalizeProblemTitle(problemTitle);
-
-        Problem problem = problemRepository.findByPlatformAndProblemNumber("PROGRAMMERS", problemNumber)
-                .orElseGet(() -> problemRepository.save(
-                        new Problem(
-                                "PROGRAMMERS",
-                                problemNumber,
-                                normalizedTitle,
-                                normalizeLevel(levelName),
-                                null
-                        )
-                ));
-
-        saveAutoCategory(problem, normalizedTitle);
-
-        if (solvedProblemRepository.existsByUserAndProblem(user, problem)) {
-            return SyncResult.skipped();
-        }
-
-        LocalDate solvedDate = fetchLatestCommitDate(
-                connectedRepository,
-                problemPath
-        );
+        LocalDate solvedDate = LocalDate.now();
 
         SolvedProblem solvedProblem = solvedProblemRepository.save(
                 new SolvedProblem(
@@ -498,8 +291,6 @@ public class GithubSyncService {
                     .build()
                     .encode()
                     .toUri();
-
-            System.out.println("commit uri = " + uri);
 
             GithubCommitResponse[] commits = webClient.get()
                     .uri(uri)
@@ -594,6 +385,20 @@ public class GithubSyncService {
         return directoryName;
     }
 
+    private String parseTitleFromPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+
+        String[] tokens = path.split("/");
+
+        if (tokens.length == 0) {
+            return path;
+        }
+
+        return tokens[tokens.length - 1];
+    }
+
     private String normalizeProblemTitle(String title) {
         if (title == null) {
             return "";
@@ -603,14 +408,6 @@ public class GithubSyncService {
                 .replace('\u00A0', ' ')
                 .replaceAll("\\s+", " ")
                 .trim();
-    }
-
-    private boolean isProgrammersDirectory(GithubContentResponse content) {
-        return "dir".equals(content.type())
-                && (
-                content.name().contains("프로그래머스")
-                        || content.name().toLowerCase().contains("programmers")
-        );
     }
 
     private boolean isCodeFile(String filename) {
@@ -632,24 +429,66 @@ public class GithubSyncService {
         return "Unknown";
     }
 
-    private String normalizeLevel(String levelName) {
-        if (levelName.equals("0")) return "Lv.0";
-        if (levelName.equals("1")) return "Lv.1";
-        if (levelName.equals("2")) return "Lv.2";
-        if (levelName.equals("3")) return "Lv.3";
-        if (levelName.equals("4")) return "Lv.4";
-        if (levelName.equals("5")) return "Lv.5";
+    private String inferPlatformFromPath(String path) {
+        if (path == null) {
+            return "CUSTOM";
+        }
 
-        String lower = levelName.toLowerCase();
+        String lowerPath = path.toLowerCase();
 
-        if (lower.contains("lv.0") || lower.contains("level0")) return "Lv.0";
-        if (lower.contains("lv.1") || lower.contains("level1")) return "Lv.1";
-        if (lower.contains("lv.2") || lower.contains("level2")) return "Lv.2";
-        if (lower.contains("lv.3") || lower.contains("level3")) return "Lv.3";
-        if (lower.contains("lv.4") || lower.contains("level4")) return "Lv.4";
-        if (lower.contains("lv.5") || lower.contains("level5")) return "Lv.5";
+        if (path.contains("프로그래머스") || lowerPath.contains("programmers")) {
+            return "PROGRAMMERS";
+        }
 
-        return levelName;
+        if (path.contains("백준") || lowerPath.contains("baekjoon") || lowerPath.contains("boj")) {
+            return "BAEKJOON";
+        }
+
+        if (lowerPath.contains("leetcode")) {
+            return "LEETCODE";
+        }
+
+        if (lowerPath.matches(".*(^|/)\\d{1,5}[-_].*")) {
+            return "LEETCODE";
+        }
+
+        return "CUSTOM";
+    }
+
+    private String inferLevelFromPath(String path) {
+        if (path == null) {
+            return "미분류";
+        }
+
+        String lowerPath = path.toLowerCase();
+
+        if (path.contains("프로그래머스") || lowerPath.contains("programmers")) {
+            if (lowerPath.contains("lv.0") || lowerPath.contains("level0") || lowerPath.contains("/0/")) return "Lv.0";
+            if (lowerPath.contains("lv.1") || lowerPath.contains("level1") || lowerPath.contains("/1/")) return "Lv.1";
+            if (lowerPath.contains("lv.2") || lowerPath.contains("level2") || lowerPath.contains("/2/")) return "Lv.2";
+            if (lowerPath.contains("lv.3") || lowerPath.contains("level3") || lowerPath.contains("/3/")) return "Lv.3";
+            if (lowerPath.contains("lv.4") || lowerPath.contains("level4") || lowerPath.contains("/4/")) return "Lv.4";
+            if (lowerPath.contains("lv.5") || lowerPath.contains("level5") || lowerPath.contains("/5/")) return "Lv.5";
+
+            return "Lv.미정";
+        }
+
+        if (path.contains("백준") || lowerPath.contains("baekjoon") || lowerPath.contains("boj")) {
+            if (lowerPath.contains("bronze")) return "Bronze";
+            if (lowerPath.contains("silver")) return "Silver";
+            if (lowerPath.contains("gold")) return "Gold";
+            if (lowerPath.contains("platinum")) return "Platinum";
+            if (lowerPath.contains("diamond")) return "Diamond";
+            if (lowerPath.contains("ruby")) return "Ruby";
+
+            return "등급 미정";
+        }
+
+        if (lowerPath.contains("leetcode") || lowerPath.matches(".*(^|/)\\d{1,5}[-_].*")) {
+            return "LeetCode";
+        }
+
+        return "미분류";
     }
 
     private void saveAutoCategory(Problem problem, String problemTitle) {

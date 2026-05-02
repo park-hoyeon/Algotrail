@@ -78,6 +78,12 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
             @Param("startDate") LocalDate startDate
     );
 
+    boolean existsByUserIdAndProblemPlatformAndProblemProblemNumber(
+            Long userId,
+            String platform,
+            Long problemNumber
+    );
+
     @Query("""
     SELECT DISTINCT sp.solvedDate
     FROM SolvedProblem sp

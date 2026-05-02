@@ -48,20 +48,35 @@ public class GithubRepositoryService {
 
         GithubRepository saved = githubRepositoryRepository.save(githubRepository);
 
-        return toResponse(saved);
+        return toResponse(saved, request.userId());
     }
 
     @Transactional(readOnly = true)
     public GithubRepositoryConnectResponse getConnectedRepository(Long userId) {
-        GithubRepository githubRepository = githubRepositoryRepository.findByUserId(userId)
-                .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
-
-        return toResponse(githubRepository);
+        return githubRepositoryRepository.findByUserId(userId)
+                .map(githubRepository -> toResponse(githubRepository, userId))
+                .orElseGet(() -> new GithubRepositoryConnectResponse(
+                        userId,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
+                        null
+                ));
     }
 
-    private GithubRepositoryConnectResponse toResponse(GithubRepository githubRepository) {
+    private GithubRepositoryConnectResponse toResponse(
+            GithubRepository githubRepository,
+            Long fallbackUserId
+    ) {
+        Long userId = githubRepository.getUser() != null
+                ? githubRepository.getUser().getId()
+                : fallbackUserId;
+
         return new GithubRepositoryConnectResponse(
-                githubRepository.getUser().getId(),
+                userId,
                 githubRepository.getGithubUsername(),
                 githubRepository.getRepositoryName(),
                 githubRepository.getRepositoryUrl(),
