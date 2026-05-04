@@ -16,22 +16,29 @@ public class ReviewSchedule {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // SolvedProblem 연결
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "solved_problem_id")
     private SolvedProblem solvedProblem;
 
-    private int reviewRound; // 1, 2, 3
+    private int reviewRound;
+
+    private LocalDate baseDate;
 
     private LocalDate reviewDate;
 
-    private String status; // PENDING / COMPLETED
+    private String status;
 
     private LocalDateTime completedAt;
 
-    public ReviewSchedule(SolvedProblem solvedProblem, int reviewRound, LocalDate reviewDate) {
+    public ReviewSchedule(
+            SolvedProblem solvedProblem,
+            int reviewRound,
+            LocalDate baseDate,
+            LocalDate reviewDate
+    ) {
         this.solvedProblem = solvedProblem;
         this.reviewRound = reviewRound;
+        this.baseDate = baseDate;
         this.reviewDate = reviewDate;
         this.status = "PENDING";
     }

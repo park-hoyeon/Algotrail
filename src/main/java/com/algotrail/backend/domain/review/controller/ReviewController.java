@@ -63,4 +63,60 @@ public class ReviewController {
     ) {
         return reviewService.getProblemReviewSchedules(solvedProblemId);
     }
+
+    @PostMapping("/backfill")
+    public ReviewBackfillResponse backfillReviewSchedules(
+            @RequestBody ReviewBackfillRequest request
+    ) {
+        int createdProblemCount = reviewScheduleService.backfillReviewSchedulesFromDate(
+                request.userId(),
+                request.startDate()
+        );
+
+        return new ReviewBackfillResponse(
+                request.userId(),
+                request.startDate(),
+                createdProblemCount,
+                createdProblemCount * 4,
+                request.startDate() + " 이후 풀이 문제부터 복습 일정이 생성되었습니다."
+        );
+    }
+
+    @DeleteMapping("/cleanup")
+    public ReviewCleanupResponse cleanupPendingReviewsBeforeDate(
+            @RequestParam Long userId,
+            @RequestParam LocalDate startDate
+    ) {
+        int deletedCount = reviewScheduleService.deletePendingReviewSchedulesBeforeDate(
+                userId,
+                startDate
+        );
+
+        return new ReviewCleanupResponse(
+                userId,
+                startDate,
+                deletedCount,
+                startDate + " 이전의 미완료 복습 일정 " + deletedCount + "개를 삭제했습니다."
+        );
+    }
+
+    @PostMapping("/rebuild")
+    public ReviewRebuildResponse rebuildReviewSchedules(
+            @RequestBody ReviewBackfillRequest request
+    ) {
+        ReviewScheduleService.ReviewRebuildResult result =
+                reviewScheduleService.rebuildPendingReviewSchedulesFromDate(
+                        request.userId(),
+                        request.startDate()
+                );
+
+        return new ReviewRebuildResponse(
+                request.userId(),
+                request.startDate(),
+                result.deletedCount(),
+                result.createdProblemCount(),
+                result.createdScheduleCount(),
+                request.startDate() + " 이후 풀이 문제부터 복습 일정이 다시 생성되었습니다."
+        );
+    }
 }

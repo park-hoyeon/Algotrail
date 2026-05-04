@@ -14,18 +14,23 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class ReviewService {
+
+    private static final String STATUS_PENDING = "PENDING";
+    private static final String STATUS_COMPLETED = "COMPLETED";
+    private static final int OVERDUE_LOOKBACK_DAYS = 60;
 
     private final ReviewScheduleRepository reviewScheduleRepository;
 
     public ReviewTodayResponse getTodayReviews(Long userId) {
         LocalDate today = LocalDate.now();
 
-        var reviews = reviewScheduleRepository
+        List<ReviewSchedule> reviews = reviewScheduleRepository
                 .findBySolvedProblemUserIdAndReviewDateLessThanEqualAndStatusOrderByReviewDateAsc(
                         userId,
                         today,
-                        "PENDING"
+                        STATUS_PENDING
                 );
 
         return ReviewTodayResponse.of(today, reviews);
@@ -39,8 +44,8 @@ public class ReviewService {
         schedule.complete();
     }
 
+    @Transactional
     public ReviewRetryResponse retryReview(Long reviewScheduleId, ReviewRetryRequest request) {
-
         ReviewSchedule reviewSchedule = reviewScheduleRepository.findById(reviewScheduleId)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 복습 일정입니다."));
 
@@ -67,33 +72,20 @@ public class ReviewService {
     }
 
     public UpcomingReviewResponse getUpcomingReviews(Long userId, int days) {
-        LocalDate startDate = LocalDate.now();
-        LocalDate endDate = startDate.plusDays(days);
+        LocalDate today = LocalDate.now();
 
-        List<ReviewSchedule> schedules =
-                reviewScheduleRepository
-                        .findTop20ByStatusAndReviewDateLessThanEqualOrderByReviewDateAsc(
-                                "PENDING",
-                                LocalDate.now()
-                        );
+        LocalDate startDate = today.minusDays(OVERDUE_LOOKBACK_DAYS);
+        LocalDate endDate = today.plusDays(days);
+
+        List<ReviewSchedule> schedules = reviewScheduleRepository.findUpcomingReviewsByUser(
+                userId,
+                STATUS_PENDING,
+                startDate,
+                endDate
+        );
 
         List<UpcomingReviewResponse.UpcomingReviewItem> reviews = schedules.stream()
-                .map(schedule -> {
-                    var solvedProblem = schedule.getSolvedProblem();
-                    var problem = solvedProblem.getProblem();
-
-                    return new UpcomingReviewResponse.UpcomingReviewItem(
-                            schedule.getId(),
-                            solvedProblem.getId(),
-                            problem.getTitle(),
-                            problem.getLevel(),
-                            schedule.getStatus(),
-                            schedule.getReviewRound(),
-                            schedule.getReviewDate(),
-                            solvedProblem.getGithubUrl(),
-                            solvedProblem.getLanguage()
-                    );
-                })
+                .map(this::toUpcomingReviewItem)
                 .toList();
 
         return new UpcomingReviewResponse(
@@ -114,5 +106,29 @@ public class ReviewService {
                         schedule.getCompletedAt()
                 ))
                 .toList();
+    }
+
+    public List<ReviewSchedule> getCompletedReviews(Long userId) {
+        return reviewScheduleRepository.findBySolvedProblemUserIdAndStatusOrderByCompletedAtDesc(
+                userId,
+                STATUS_COMPLETED
+        );
+    }
+
+    private UpcomingReviewResponse.UpcomingReviewItem toUpcomingReviewItem(ReviewSchedule schedule) {
+        SolvedProblem solvedProblem = schedule.getSolvedProblem();
+        var problem = solvedProblem.getProblem();
+
+        return new UpcomingReviewResponse.UpcomingReviewItem(
+                schedule.getId(),
+                solvedProblem.getId(),
+                problem.getTitle(),
+                problem.getLevel(),
+                schedule.getStatus(),
+                schedule.getReviewRound(),
+                schedule.getReviewDate(),
+                solvedProblem.getGithubUrl(),
+                solvedProblem.getLanguage()
+        );
     }
 }

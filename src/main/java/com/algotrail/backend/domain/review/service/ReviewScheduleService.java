@@ -15,41 +15,23 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ReviewScheduleService {
 
+    private static final int[] REVIEW_DAYS = {3, 7, 14, 30};
+    private static final int OVERDUE_LOOKBACK_DAYS = 60;
+
+    private static final String STATUS_PENDING = "PENDING";
+    private static final String STATUS_COMPLETED = "COMPLETED";
+
     private final ReviewScheduleRepository reviewScheduleRepository;
     private final SolvedProblemRepository solvedProblemRepository;
 
-    private static final int[] REVIEW_DAYS = {3, 7, 14, 30};
-
-    // 이 날짜 이후에 푼 문제만 복습 일정 생성
-    private static final LocalDate REVIEW_START_DATE = LocalDate.of(2026, 4, 28);
-
     @Transactional
     public void createReviewSchedules(SolvedProblem solvedProblem) {
-        LocalDate solvedDate = solvedProblem.getSolvedDate();
-
-        if (solvedDate.isBefore(REVIEW_START_DATE)) {
+        if (reviewScheduleRepository.existsBySolvedProblemId(solvedProblem.getId())) {
             return;
         }
 
-        for (int i = 0; i < REVIEW_DAYS.length; i++) {
-            int round = i + 1;
-
-            boolean exists = reviewScheduleRepository
-                    .existsBySolvedProblemIdAndReviewRound(
-                            solvedProblem.getId(),
-                            round
-                    );
-
-            if (exists) continue;
-
-            ReviewSchedule review = new ReviewSchedule(
-                    solvedProblem,
-                    round,
-                    solvedDate.plusDays(REVIEW_DAYS[i])
-            );
-
-            reviewScheduleRepository.save(review);
-        }
+        LocalDate baseDate = getSolvedBaseDate(solvedProblem);
+        createReviewSchedulesByBaseDate(solvedProblem, baseDate);
     }
 
     @Transactional
@@ -57,38 +39,97 @@ public class ReviewScheduleService {
         List<SolvedProblem> solvedProblems =
                 solvedProblemRepository.findByUserIdOrderBySolvedDateDesc(userId);
 
-        int createdCount = 0;
+        return createReviewSchedulesForProblems(solvedProblems);
+    }
+
+    @Transactional
+    public int backfillReviewSchedulesFromDate(Long userId, LocalDate startDate) {
+        List<SolvedProblem> solvedProblems =
+                solvedProblemRepository.findByUserIdAndSolvedDateGreaterThanEqualOrderBySolvedDateDesc(
+                        userId,
+                        startDate
+                );
+
+        return createReviewSchedulesForProblems(solvedProblems);
+    }
+
+    @Transactional
+    public ReviewRebuildResult rebuildPendingReviewSchedulesFromDate(
+            Long userId,
+            LocalDate startDate
+    ) {
+        List<ReviewSchedule> pendingSchedules =
+                reviewScheduleRepository.findBySolvedProblemUserIdAndStatus(
+                        userId,
+                        STATUS_PENDING
+                );
+
+        int deletedCount = pendingSchedules.size();
+        reviewScheduleRepository.deleteAll(pendingSchedules);
+
+        List<SolvedProblem> targetProblems =
+                solvedProblemRepository.findByUserIdAndSolvedDateGreaterThanEqualOrderBySolvedDateDesc(
+                        userId,
+                        startDate
+                );
+
+        int createdProblemCount = createReviewSchedulesForProblems(targetProblems);
+
+        return new ReviewRebuildResult(
+                deletedCount,
+                createdProblemCount,
+                createdProblemCount * REVIEW_DAYS.length
+        );
+    }
+
+    @Transactional
+    public int createReviewSchedulesForProblems(List<SolvedProblem> solvedProblems) {
+        int createdProblemCount = 0;
 
         for (SolvedProblem solvedProblem : solvedProblems) {
-            LocalDate solvedDate = solvedProblem.getSolvedDate();
-
-            if (solvedDate.isBefore(REVIEW_START_DATE)) {
+            if (reviewScheduleRepository.existsBySolvedProblemId(solvedProblem.getId())) {
                 continue;
             }
 
-            for (int i = 0; i < REVIEW_DAYS.length; i++) {
-                int round = i + 1;
+            LocalDate baseDate = getSolvedBaseDate(solvedProblem);
+            createReviewSchedulesByBaseDate(solvedProblem, baseDate);
 
-                boolean exists = reviewScheduleRepository
-                        .existsBySolvedProblemIdAndReviewRound(
-                                solvedProblem.getId(),
-                                round
-                        );
-
-                if (exists) continue;
-
-                ReviewSchedule reviewSchedule = new ReviewSchedule(
-                        solvedProblem,
-                        round,
-                        solvedDate.plusDays(REVIEW_DAYS[i])
-                );
-
-                reviewScheduleRepository.save(reviewSchedule);
-                createdCount++;
-            }
+            createdProblemCount++;
         }
 
-        return createdCount;
+        return createdProblemCount;
+    }
+
+    private LocalDate getSolvedBaseDate(SolvedProblem solvedProblem) {
+        if (solvedProblem.getSolvedDate() != null) {
+            return solvedProblem.getSolvedDate();
+        }
+
+        return LocalDate.now();
+    }
+
+    private void createReviewSchedulesByBaseDate(SolvedProblem solvedProblem, LocalDate baseDate) {
+        for (int i = 0; i < REVIEW_DAYS.length; i++) {
+            int round = i + 1;
+
+            boolean exists = reviewScheduleRepository.existsBySolvedProblemIdAndReviewRound(
+                    solvedProblem.getId(),
+                    round
+            );
+
+            if (exists) {
+                continue;
+            }
+
+            ReviewSchedule reviewSchedule = new ReviewSchedule(
+                    solvedProblem,
+                    round,
+                    baseDate,
+                    baseDate.plusDays(REVIEW_DAYS[i])
+            );
+
+            reviewScheduleRepository.save(reviewSchedule);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -97,36 +138,36 @@ public class ReviewScheduleService {
                 .findBySolvedProblemUserIdAndReviewDateLessThanEqualAndStatusOrderByReviewDateAsc(
                         userId,
                         LocalDate.now(),
-                        "PENDING"
+                        STATUS_PENDING
                 );
     }
 
     @Transactional(readOnly = true)
     public List<ReviewSchedule> getUpcomingReviews(Long userId, int days) {
         LocalDate today = LocalDate.now();
+
+        LocalDate startDate = today.minusDays(OVERDUE_LOOKBACK_DAYS);
         LocalDate endDate = today.plusDays(days);
 
         return reviewScheduleRepository.findUpcomingReviewsByUser(
                 userId,
-                "PENDING",
-                today,
+                STATUS_PENDING,
+                startDate,
                 endDate
         );
     }
 
     @Transactional(readOnly = true)
     public List<ReviewSchedule> getCompletedReviews(Long userId) {
-        return reviewScheduleRepository
-                .findBySolvedProblemUserIdAndStatusOrderByCompletedAtDesc(
-                        userId,
-                        "COMPLETED"
-                );
+        return reviewScheduleRepository.findBySolvedProblemUserIdAndStatusOrderByCompletedAtDesc(
+                userId,
+                STATUS_COMPLETED
+        );
     }
 
     @Transactional(readOnly = true)
     public List<ReviewSchedule> getProblemReviewSchedules(Long solvedProblemId) {
-        return reviewScheduleRepository
-                .findBySolvedProblemIdOrderByReviewRoundAsc(solvedProblemId);
+        return reviewScheduleRepository.findBySolvedProblemIdOrderByReviewRoundAsc(solvedProblemId);
     }
 
     @Transactional
@@ -143,5 +184,27 @@ public class ReviewScheduleService {
                 .orElseThrow(() -> new IllegalArgumentException("복습 일정을 찾을 수 없습니다."));
 
         reviewSchedule.retry();
+    }
+
+    @Transactional
+    public int deletePendingReviewSchedulesBeforeDate(Long userId, LocalDate startDate) {
+        List<ReviewSchedule> schedules =
+                reviewScheduleRepository.findBySolvedProblemUserIdAndStatusAndReviewDateBefore(
+                        userId,
+                        STATUS_PENDING,
+                        startDate
+                );
+
+        int deletedCount = schedules.size();
+        reviewScheduleRepository.deleteAll(schedules);
+
+        return deletedCount;
+    }
+
+    public record ReviewRebuildResult(
+            int deletedCount,
+            int createdProblemCount,
+            int createdScheduleCount
+    ) {
     }
 }

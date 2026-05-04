@@ -24,7 +24,10 @@ public class GithubSyncController {
     }
 
     @DeleteMapping("/disconnect")
-    public void disconnectGithub(@RequestParam Long userId) {
-        githubSyncService.disconnectGithub(userId);
+    public void disconnectGithub(
+            @RequestParam Long userId,
+            @RequestParam(defaultValue = "false") boolean resetRecords
+    ) {
+        githubSyncService.disconnectGithub(userId, resetRecords);
     }
 }

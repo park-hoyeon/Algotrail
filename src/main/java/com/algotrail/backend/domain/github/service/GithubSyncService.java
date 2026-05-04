@@ -14,8 +14,8 @@ import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.problem.repository.ProblemCategoryRepository;
 import com.algotrail.backend.domain.problem.repository.ProblemRepository;
 import com.algotrail.backend.domain.problem.repository.SolvedProblemRepository;
-import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
+import com.algotrail.backend.domain.review.service.ReviewScheduleService;
 import com.algotrail.backend.domain.user.entity.User;
 import com.algotrail.backend.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +27,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URI;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -38,11 +39,12 @@ public class GithubSyncService {
     private final UserRepository userRepository;
     private final ProblemRepository problemRepository;
     private final SolvedProblemRepository solvedProblemRepository;
-    private final ReviewScheduleRepository reviewScheduleRepository;
+    private final ReviewScheduleService reviewScheduleService;
     private final CategoryRepository categoryRepository;
     private final ProblemCategoryRepository problemCategoryRepository;
     private final GithubSyncLogRepository githubSyncLogRepository;
     private final GithubRepositoryRepository githubRepositoryRepository;
+    private final ReviewScheduleRepository reviewScheduleRepository;
 
     @Transactional
     public GithubSyncResponse sync(Long userId) {
@@ -57,14 +59,19 @@ public class GithubSyncService {
 
             String rootPath = connectedRepository.getRootPath();
 
+            List<SolvedProblem> newlySavedSolvedProblems = new ArrayList<>();
+
             SyncResult totalResult = syncRootDirectory(
                     user,
                     connectedRepository,
-                    rootPath == null ? "" : rootPath
+                    rootPath == null ? "" : rootPath,
+                    newlySavedSolvedProblems
             );
 
             int newSolvedCount = totalResult.addedCount();
             int skippedCount = totalResult.skippedCount();
+
+            reviewScheduleService.createReviewSchedulesForProblems(newlySavedSolvedProblems);
 
             LocalDateTime finishedAt = LocalDateTime.now();
 
@@ -116,7 +123,8 @@ public class GithubSyncService {
     private SyncResult syncRootDirectory(
             User user,
             GithubRepository connectedRepository,
-            String rootPath
+            String rootPath,
+            List<SolvedProblem> newlySavedSolvedProblems
     ) {
         String url = buildContentsUrl(
                 connectedRepository.getGithubUsername(),
@@ -141,7 +149,8 @@ public class GithubSyncService {
                 SyncResult result = syncGenericDirectory(
                         user,
                         connectedRepository,
-                        content.path()
+                        content.path(),
+                        newlySavedSolvedProblems
                 );
 
                 totalResult = totalResult.plus(result);
@@ -152,7 +161,8 @@ public class GithubSyncService {
                         user,
                         connectedRepository,
                         content,
-                        rootPath
+                        rootPath,
+                        newlySavedSolvedProblems
                 );
 
                 totalResult = totalResult.plus(result);
@@ -165,7 +175,8 @@ public class GithubSyncService {
     private SyncResult syncGenericDirectory(
             User user,
             GithubRepository connectedRepository,
-            String directoryPath
+            String directoryPath,
+            List<SolvedProblem> newlySavedSolvedProblems
     ) {
         String url = buildContentsUrl(
                 connectedRepository.getGithubUsername(),
@@ -197,7 +208,8 @@ public class GithubSyncService {
                     user,
                     connectedRepository,
                     codeFile,
-                    directoryPath
+                    directoryPath,
+                    newlySavedSolvedProblems
             );
 
             totalResult = totalResult.plus(result);
@@ -208,7 +220,8 @@ public class GithubSyncService {
                 SyncResult result = syncGenericDirectory(
                         user,
                         connectedRepository,
-                        content.path()
+                        content.path(),
+                        newlySavedSolvedProblems
                 );
 
                 totalResult = totalResult.plus(result);
@@ -222,7 +235,8 @@ public class GithubSyncService {
             User user,
             GithubRepository connectedRepository,
             GithubContentResponse codeFile,
-            String path
+            String path,
+            List<SolvedProblem> newlySavedSolvedProblems
     ) {
         String problemTitle = parseTitleFromPath(path);
         Long problemNumber = parseProblemNumber(problemTitle);
@@ -258,7 +272,10 @@ public class GithubSyncService {
 
         saveAutoCategory(problem, normalizedTitle);
 
-        LocalDate solvedDate = LocalDate.now();
+        LocalDate solvedDate = fetchLatestCommitDate(
+                connectedRepository,
+                codeFile.path()
+        );
 
         SolvedProblem solvedProblem = solvedProblemRepository.save(
                 new SolvedProblem(
@@ -270,7 +287,7 @@ public class GithubSyncService {
                 )
         );
 
-        createFirstReviewSchedule(solvedProblem);
+        newlySavedSolvedProblems.add(solvedProblem);
 
         return SyncResult.added();
     }
@@ -350,16 +367,6 @@ public class GithubSyncService {
                 skippedCount,
                 status,
                 message
-        ));
-    }
-
-    private void createFirstReviewSchedule(SolvedProblem solvedProblem) {
-        LocalDate solvedDate = solvedProblem.getSolvedDate();
-
-        reviewScheduleRepository.save(new ReviewSchedule(
-                solvedProblem,
-                1,
-                solvedDate.plusDays(3)
         ));
     }
 
@@ -575,9 +582,14 @@ public class GithubSyncService {
     }
 
     @Transactional
-    public void disconnectGithub(Long userId) {
+    public void disconnectGithub(Long userId, boolean resetRecords) {
         GithubRepository connectedRepository = githubRepositoryRepository.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
+
+        if (resetRecords) {
+            reviewScheduleRepository.deleteAllByUserId(userId);
+            solvedProblemRepository.deleteAllByUserId(userId);
+        }
 
         githubRepositoryRepository.delete(connectedRepository);
     }
