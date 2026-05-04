@@ -95,10 +95,7 @@ public class ProblemService {
             trimmedKeyword = keyword.trim();
         }
 
-        ProblemStatus problemStatus = null;
-        if (status != null && !status.isBlank()) {
-            problemStatus = ProblemStatus.valueOf(status.trim().toUpperCase());
-        }
+        ProblemStatus problemStatus = convertToProblemStatus(status);
 
         return solvedProblemRepository.searchProblems(
                         userId,
@@ -114,6 +111,21 @@ public class ProblemService {
                     return ProblemListResponse.of(solvedProblem, categories);
                 })
                 .toList();
+    }
+
+    private ProblemStatus convertToProblemStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return null;
+        }
+
+        String value = status.trim();
+
+        return switch (value) {
+            case "SOLVED", "해결", "성공" -> ProblemStatus.SOLVED;
+            case "REVIEW_REQUIRED", "복습필요", "복습 필요" -> ProblemStatus.REVIEW_REQUIRED;
+            case "RETRY", "재도전", "다시풀기", "다시 풀기" -> ProblemStatus.RETRY;
+            default -> ProblemStatus.valueOf(value.toUpperCase());
+        };
     }
 
     @Transactional

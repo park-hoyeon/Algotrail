@@ -16,6 +16,7 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
 
     boolean existsByUserAndProblem(User user, Problem problem);
 
+    boolean existsByUserIdAndProblemId(Long userId, Long problemId);
     List<SolvedProblem> findByUserIdOrderBySolvedDateDesc(Long userId);
 
     long countByUserId(Long userId);

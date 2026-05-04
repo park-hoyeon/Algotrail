@@ -2,6 +2,7 @@ package com.algotrail.backend.domain.github.controller;
 
 import com.algotrail.backend.domain.github.dto.GithubSettingResponse;
 import com.algotrail.backend.domain.github.dto.GithubSyncResponse;
+import com.algotrail.backend.domain.github.dto.GithubSyncStartResponse;
 import com.algotrail.backend.domain.github.service.GithubSyncService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -29,5 +30,14 @@ public class GithubSyncController {
             @RequestParam(defaultValue = "false") boolean resetRecords
     ) {
         githubSyncService.disconnectGithub(userId, resetRecords);
+    }
+
+    @PostMapping("/sync")
+    public GithubSyncStartResponse syncGithubRepository(@RequestParam Long userId) {
+        githubSyncService.syncAsync(userId);
+
+        return new GithubSyncStartResponse(
+                "GitHub 저장소 분석을 시작했습니다. 잠시 후 자동으로 반영됩니다."
+        );
     }
 }
