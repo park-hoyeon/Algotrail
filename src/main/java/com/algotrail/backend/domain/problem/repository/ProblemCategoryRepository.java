@@ -11,8 +11,6 @@ public interface ProblemCategoryRepository extends JpaRepository<ProblemCategory
 
     List<ProblemCategory> findByProblem(Problem problem);
 
-    void deleteByProblem(Problem problem);
-
     @Query("""
         SELECT pc.category.name, COUNT(sp.id)
         FROM SolvedProblem sp

@@ -1,6 +1,7 @@
 package com.algotrail.backend.domain.problem.dto;
 
 import com.algotrail.backend.domain.problem.entity.ProblemCategory;
+import com.algotrail.backend.domain.problem.entity.ProblemStatus;
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 
 import java.time.LocalDate;
@@ -32,9 +33,17 @@ public record ProblemListResponse(
                         .map(pc -> pc.getCategory().getName())
                         .toList(),
                 solvedProblem.getSolvedDate(),
-                solvedProblem.getStatus().name(),
+                getSafeStatus(solvedProblem),
                 solvedProblem.getLanguage(),
                 solvedProblem.getGithubUrl()
         );
+    }
+
+    private static String getSafeStatus(SolvedProblem solvedProblem) {
+        if (solvedProblem.getStatus() == null) {
+            return ProblemStatus.SOLVED.name();
+        }
+
+        return solvedProblem.getStatus().name();
     }
 }

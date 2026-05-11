@@ -31,6 +31,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import com.algotrail.backend.domain.tag.dto.TagResolveResult;
+import com.algotrail.backend.domain.tag.service.ProblemTagResolver;
 
 @Service
 @RequiredArgsConstructor
@@ -46,6 +48,7 @@ public class GithubSyncService {
     private final GithubSyncLogRepository githubSyncLogRepository;
     private final GithubRepositoryRepository githubRepositoryRepository;
     private final ReviewScheduleRepository reviewScheduleRepository;
+    private final ProblemTagResolver problemTagResolver;
 
     @Async
     public void syncAsync(Long userId) {
@@ -300,7 +303,18 @@ public class GithubSyncService {
                         )
                 ));
 
-        saveAutoCategory(problem, normalizedTitle);
+        String language = detectLanguage(codeFile.name());
+        String codeContent = fetchCodeContentSafely(codeFile.download_url());
+
+        TagResolveResult tagResult = problemTagResolver.resolve(
+                platform,
+                problemNumber,
+                normalizedTitle,
+                language,
+                codeContent
+        );
+
+        saveResolvedCategory(problem, tagResult.categoryName());
 
         LocalDate solvedDate = fetchLatestCommitDateSafely(
                 connectedRepository,
@@ -312,7 +326,7 @@ public class GithubSyncService {
                         user,
                         problem,
                         codeFile.html_url(),
-                        detectLanguage(codeFile.name()),
+                        language,
                         solvedDate
                 )
         );
@@ -320,6 +334,48 @@ public class GithubSyncService {
         newlySavedSolvedProblems.add(solvedProblem);
 
         return SyncResult.added();
+    }
+
+    private String fetchCodeContentSafely(String downloadUrl) {
+        if (downloadUrl == null || downloadUrl.isBlank()) {
+            return "";
+        }
+
+        try {
+            String content = webClient.get()
+                    .uri(downloadUrl)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            if (content == null) {
+                return "";
+            }
+
+            if (content.length() > 6000) {
+                return content.substring(0, 6000);
+            }
+
+            return content;
+
+        } catch (Exception e) {
+            System.out.println("[GitHub 코드 원문 조회 실패] " + e.getMessage());
+            return "";
+        }
+    }
+
+    private void saveResolvedCategory(Problem problem, String categoryName) {
+        Category category = categoryRepository.findByName(categoryName)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 카테고리입니다: " + categoryName));
+
+        List<ProblemCategory> existingCategories = problemCategoryRepository.findByProblem(problem);
+
+        if (!existingCategories.isEmpty()) {
+            problemCategoryRepository.deleteAll(existingCategories);
+            problemCategoryRepository.flush();
+        }
+
+        problemCategoryRepository.save(new ProblemCategory(problem, category));
     }
 
     private LocalDate fetchLatestCommitDateSafely(
@@ -583,65 +639,6 @@ public class GithubSyncService {
         }
 
         return "미분류";
-    }
-
-    private void saveAutoCategory(Problem problem, String problemTitle) {
-        String categoryName = inferCategoryName(problemTitle);
-
-        Category category = categoryRepository.findByName(categoryName)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 카테고리입니다: " + categoryName));
-
-        boolean alreadyExists = problemCategoryRepository.findByProblem(problem)
-                .stream()
-                .anyMatch(problemCategory ->
-                        problemCategory.getCategory().getId().equals(category.getId())
-                );
-
-        if (!alreadyExists) {
-            problemCategoryRepository.save(new ProblemCategory(problem, category));
-        }
-    }
-
-    private String inferCategoryName(String problemTitle) {
-        String title = problemTitle.toLowerCase();
-
-        if (title.contains("dfs") || title.contains("bfs") || title.contains("네트워크") || title.contains("타겟 넘버")) {
-            return "BFS/DFS";
-        }
-
-        if (title.contains("배달") || title.contains("최단") || title.contains("다익스트라")) {
-            return "최단경로";
-        }
-
-        if (title.contains("해시") || title.contains("완주하지 못한 선수") || title.contains("전화번호")) {
-            return "해시";
-        }
-
-        if (title.contains("스택") || title.contains("큐") || title.contains("기능개발") || title.contains("올바른 괄호")) {
-            return "스택/큐";
-        }
-
-        if (title.contains("정렬") || title.contains("k번째수") || title.contains("가장 큰 수")) {
-            return "정렬";
-        }
-
-        if (title.contains("dp") || title.contains("타일") || title.contains("정수 삼각형")) {
-            return "DP";
-        }
-
-        if (title.contains("그리디") || title.contains("체육복") || title.contains("구명보트")) {
-            return "그리디";
-        }
-
-        if (title.contains("카펫") || title.contains("모의고사") || title.contains("소수 찾기")) {
-            return "완전탐색";
-        }
-
-        if (title.contains("문자열") || title.contains("문자") || title.contains("이상한 문자")) {
-            return "문자열";
-        }
-
-        return "구현";
     }
 
     @Transactional(readOnly = true)

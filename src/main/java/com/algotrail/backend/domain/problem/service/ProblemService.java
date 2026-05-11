@@ -8,6 +8,7 @@ import com.algotrail.backend.domain.problem.repository.ProblemCategoryRepository
 import com.algotrail.backend.domain.problem.repository.SolvedProblemRepository;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
+import com.algotrail.backend.domain.tag.service.ProblemTagResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,7 @@ public class ProblemService {
     private final ReviewScheduleRepository reviewScheduleRepository;
     private final ProblemCategoryRepository problemCategoryRepository;
     private final CategoryRepository categoryRepository;
+    private final ProblemTagResolver problemTagResolver;
 
     public List<ProblemListResponse> getProblems(Long userId) {
         return solvedProblemRepository.findByUserIdOrderBySolvedDateDesc(userId)
@@ -73,7 +75,13 @@ public class ProblemService {
     }
 
     private void updateCategories(Problem problem, List<Long> categoryIds) {
-        problemCategoryRepository.deleteByProblem(problem);
+        List<ProblemCategory> existingCategories =
+                problemCategoryRepository.findByProblem(problem);
+
+        if (!existingCategories.isEmpty()) {
+            problemCategoryRepository.deleteAll(existingCategories);
+            problemCategoryRepository.flush();
+        }
 
         List<Category> categories = categoryRepository.findAllById(categoryIds);
 
@@ -141,9 +149,22 @@ public class ProblemService {
         Category category = categoryRepository.findByName(request.categoryName())
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 카테고리입니다: " + request.categoryName()));
 
-        problemCategoryRepository.deleteByProblem(problem);
+        List<ProblemCategory> existingCategories =
+                problemCategoryRepository.findByProblem(problem);
+
+        if (!existingCategories.isEmpty()) {
+            problemCategoryRepository.deleteAll(existingCategories);
+            problemCategoryRepository.flush();
+        }
 
         problemCategoryRepository.save(new ProblemCategory(problem, category));
+
+        problemTagResolver.saveUserCorrectedCategory(
+                problem.getPlatform(),
+                problem.getProblemNumber(),
+                problem.getTitle(),
+                category.getName()
+        );
 
         return new ProblemCategoryUpdateResponse(
                 solvedProblem.getId(),
