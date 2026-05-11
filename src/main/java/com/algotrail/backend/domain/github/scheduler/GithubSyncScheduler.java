@@ -16,7 +16,7 @@ public class GithubSyncScheduler {
     private final UserRepository userRepository;
     private final GithubSyncService githubSyncService;
 
-    @Scheduled(fixedDelay = 1000 * 60 * 30)
+    @Scheduled(initialDelay = 600000, fixedDelay = 1800000)
     public void syncAllUsers() {
         log.info("[GitHub Sync Scheduler] 자동 동기화 시작");
 

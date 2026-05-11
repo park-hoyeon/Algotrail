@@ -16,6 +16,8 @@ import com.algotrail.backend.domain.problem.repository.ProblemRepository;
 import com.algotrail.backend.domain.problem.repository.SolvedProblemRepository;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
 import com.algotrail.backend.domain.review.service.ReviewScheduleService;
+import com.algotrail.backend.domain.tag.dto.TagResolveResult;
+import com.algotrail.backend.domain.tag.service.ProblemTagResolver;
 import com.algotrail.backend.domain.user.entity.User;
 import com.algotrail.backend.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -31,12 +33,12 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import com.algotrail.backend.domain.tag.dto.TagResolveResult;
-import com.algotrail.backend.domain.tag.service.ProblemTagResolver;
 
 @Service
 @RequiredArgsConstructor
 public class GithubSyncService {
+
+    private static final String DEFAULT_CATEGORY_NAME = "미분류";
 
     private final WebClient webClient;
     private final UserRepository userRepository;
@@ -48,6 +50,7 @@ public class GithubSyncService {
     private final GithubSyncLogRepository githubSyncLogRepository;
     private final GithubRepositoryRepository githubRepositoryRepository;
     private final ReviewScheduleRepository reviewScheduleRepository;
+    private final GithubSyncLockService githubSyncLockService;
     private final ProblemTagResolver problemTagResolver;
 
     @Async
@@ -59,6 +62,24 @@ public class GithubSyncService {
     public GithubSyncResponse sync(Long userId) {
         LocalDateTime startedAt = LocalDateTime.now();
 
+        System.out.println("[GitHub Sync] 동기화 요청 userId=" + userId);
+
+        boolean locked = githubSyncLockService.tryLock(userId);
+
+        System.out.println("[GitHub Sync] lock result=" + locked);
+
+        if (!locked) {
+            return new GithubSyncResponse(
+                    userId,
+                    0,
+                    0,
+                    startedAt,
+                    LocalDateTime.now(),
+                    "SKIPPED",
+                    "이미 GitHub 동기화가 진행 중입니다."
+            );
+        }
+
         try {
             User user = userRepository.findById(userId)
                     .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
@@ -66,8 +87,7 @@ public class GithubSyncService {
             GithubRepository connectedRepository = githubRepositoryRepository.findByUserId(userId)
                     .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
 
-            String rootPath = connectedRepository.getRootPath();
-            String safeRootPath = normalizeRootPath(rootPath);
+            String safeRootPath = normalizeRootPath(connectedRepository.getRootPath());
 
             List<SolvedProblem> newlySavedSolvedProblems = new ArrayList<>();
 
@@ -88,9 +108,9 @@ public class GithubSyncService {
             LocalDateTime finishedAt = LocalDateTime.now();
 
             String message = "새로운 풀이 " + newSolvedCount
-                    + "개를 동기화했습니다. 기존 풀이 "
+                    + "개를 동기화했습니다. 건너뛴 풀이 "
                     + skippedCount
-                    + "개는 건너뛰었습니다.";
+                    + "개입니다.";
 
             connectedRepository.updateLastSyncedAt();
 
@@ -129,6 +149,10 @@ public class GithubSyncService {
                     "FAILED",
                     message
             );
+
+        } finally {
+            System.out.println("[GitHub Sync] lock 해제 userId=" + userId);
+            githubSyncLockService.unlock(userId);
         }
     }
 
@@ -275,7 +299,7 @@ public class GithubSyncService {
         Long problemNumber = parseProblemNumber(problemDirectoryName);
 
         if (problemNumber == null) {
-            System.out.println("문제번호 파싱 실패: " + path);
+            System.out.println("[Sync Skip] 문제번호 파싱 실패: " + path);
             return SyncResult.skipped();
         }
 
@@ -283,6 +307,7 @@ public class GithubSyncService {
 
         String platform = inferPlatformFromPath(path);
         String level = inferLevelFromPath(path);
+        String language = detectLanguage(codeFile.name());
 
         if (solvedProblemRepository.existsByUserIdAndProblemPlatformAndProblemProblemNumber(
                 user.getId(),
@@ -303,19 +328,6 @@ public class GithubSyncService {
                         )
                 ));
 
-        String language = detectLanguage(codeFile.name());
-        String codeContent = fetchCodeContentSafely(codeFile.download_url());
-
-        TagResolveResult tagResult = problemTagResolver.resolve(
-                platform,
-                problemNumber,
-                normalizedTitle,
-                language,
-                codeContent
-        );
-
-        saveResolvedCategory(problem, tagResult.categoryName());
-
         LocalDate solvedDate = fetchLatestCommitDateSafely(
                 connectedRepository,
                 codeFile.path()
@@ -331,42 +343,82 @@ public class GithubSyncService {
                 )
         );
 
+        String codeContent = fetchCodeContentFromGithubUrl(codeFile.html_url());
+
+        TagResolveResult tagResult = problemTagResolver.resolve(
+                platform,
+                problemNumber,
+                normalizedTitle,
+                language,
+                codeContent
+        );
+
+        String resolvedCategoryName = tagResult.categoryName();
+
+        saveResolvedCategory(problem, resolvedCategoryName);
+
         newlySavedSolvedProblems.add(solvedProblem);
+
+        System.out.println("[GitHub Sync] 문제 저장 완료: "
+                + problemNumber + ". " + normalizedTitle
+                + " / platform=" + platform
+                + " / 유형=" + resolvedCategoryName
+                + " / source=" + tagResult.source());
 
         return SyncResult.added();
     }
 
-    private String fetchCodeContentSafely(String downloadUrl) {
-        if (downloadUrl == null || downloadUrl.isBlank()) {
+    private String fetchCodeContentFromGithubUrl(String githubUrl) {
+        if (githubUrl == null || githubUrl.isBlank()) {
             return "";
         }
 
         try {
+            String rawUrl = convertGithubBlobUrlToRawUrl(githubUrl);
+
+            System.out.println("[초기 분류용 코드 조회]");
+            System.out.println("htmlUrl = " + githubUrl);
+            System.out.println("rawUrl = " + rawUrl);
+
             String content = webClient.get()
-                    .uri(downloadUrl)
+                    .uri(URI.create(rawUrl))
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
 
-            if (content == null) {
+            if (content == null || content.isBlank()) {
                 return "";
             }
 
-            if (content.length() > 6000) {
-                return content.substring(0, 6000);
-            }
-
-            return content;
+            return content.length() > 5000
+                    ? content.substring(0, 5000)
+                    : content;
 
         } catch (Exception e) {
-            System.out.println("[GitHub 코드 원문 조회 실패] " + e.getMessage());
+            System.out.println("[초기 분류용 코드 조회 실패] " + e.getMessage());
             return "";
         }
     }
 
+    private String convertGithubBlobUrlToRawUrl(String githubUrl) {
+        return githubUrl
+                .replace("https://github.com/", "https://raw.githubusercontent.com/")
+                .replace("/blob/", "/");
+    }
+
     private void saveResolvedCategory(Problem problem, String categoryName) {
-        Category category = categoryRepository.findByName(categoryName)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 카테고리입니다: " + categoryName));
+        String safeCategoryName = normalizeCategoryName(categoryName);
+
+        Category category = categoryRepository.findByName(safeCategoryName)
+                .orElseGet(() -> {
+                    System.out.println("[Category Fallback] DB에 없는 카테고리: "
+                            + safeCategoryName + " -> 미분류로 저장");
+
+                    return categoryRepository.findByName(DEFAULT_CATEGORY_NAME)
+                            .orElseThrow(() -> new IllegalArgumentException(
+                                    "기본 카테고리도 존재하지 않습니다: " + DEFAULT_CATEGORY_NAME
+                            ));
+                });
 
         List<ProblemCategory> existingCategories = problemCategoryRepository.findByProblem(problem);
 
@@ -376,6 +428,14 @@ public class GithubSyncService {
         }
 
         problemCategoryRepository.save(new ProblemCategory(problem, category));
+    }
+
+    private String normalizeCategoryName(String categoryName) {
+        if (categoryName == null || categoryName.isBlank()) {
+            return DEFAULT_CATEGORY_NAME;
+        }
+
+        return categoryName.trim();
     }
 
     private LocalDate fetchLatestCommitDateSafely(
@@ -495,9 +555,7 @@ public class GithubSyncService {
             }
 
             String firstToken = directoryName.split(" ")[0].trim();
-
-            firstToken = firstToken
-                    .replaceAll("[^0-9]", "");
+            firstToken = firstToken.replaceAll("[^0-9]", "");
 
             if (firstToken.isBlank()) {
                 return null;
@@ -529,6 +587,8 @@ public class GithubSyncService {
 
         return title
                 .replace('\u00A0', ' ')
+                .replace('\u2005', ' ')
+                .replace('\u200B', ' ')
                 .replaceAll("\\s+", " ")
                 .trim();
     }

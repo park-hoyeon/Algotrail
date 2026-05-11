@@ -5,7 +5,6 @@ import com.algotrail.backend.domain.tag.dto.TagResolveResult;
 import com.algotrail.backend.domain.tag.entity.CategorySource;
 import com.algotrail.backend.domain.tag.entity.ProblemTagCache;
 import com.algotrail.backend.domain.tag.repository.ProblemTagCacheRepository;
-import com.algotrail.backend.domain.tag.repository.ProgrammersProblemTagRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,11 +18,16 @@ public class ProblemTagResolver {
     private final ProblemTagCacheRepository problemTagCacheRepository;
     private final SolvedAcClient solvedAcClient;
     private final CategoryMappingService categoryMappingService;
-    private final ProgrammersProblemTagRepository programmersProblemTagRepository;
     private final AiCategoryClassifier aiCategoryClassifier;
 
     @Transactional
-    public TagResolveResult resolve(String platform, Long problemNumber, String problemTitle, String language, String codeContent) {
+    public TagResolveResult resolve(
+            String platform,
+            Long problemNumber,
+            String problemTitle,
+            String language,
+            String codeContent
+    ) {
         String normalizedPlatform = normalizePlatform(platform);
         String normalizedTitle = normalizeProblemTitle(normalizedPlatform, problemTitle);
 
@@ -51,24 +55,41 @@ public class ProblemTagResolver {
         if ("BAEKJOON".equals(platform)) {
             result = resolveBaekjoon(problemNumber);
         } else if ("PROGRAMMERS".equals(platform)) {
-            result = resolveProgrammers(
-                    problemTitle,
-                    language,
-                    codeContent
-            );
+            result = resolveProgrammers(problemNumber, problemTitle, language, codeContent);
         } else {
             result = new TagResolveResult("미분류", CategorySource.UNKNOWN);
         }
 
-        problemTagCacheRepository.save(new ProblemTagCache(
-                platform,
-                problemNumber,
-                problemTitle,
-                result.categoryName(),
-                result.source()
-        ));
+        String categoryName = normalizeCategoryName(result.categoryName());
 
-        return result;
+        if (shouldCache(categoryName, result.source())) {
+            problemTagCacheRepository.save(new ProblemTagCache(
+                    platform,
+                    problemNumber,
+                    problemTitle,
+                    categoryName,
+                    result.source()
+            ));
+        } else {
+            System.out.println("[Tag Cache 저장 안 함] "
+                    + platform + " " + problemNumber
+                    + " / category=" + categoryName
+                    + " / source=" + result.source());
+        }
+
+        return new TagResolveResult(categoryName, result.source());
+    }
+
+    private boolean shouldCache(String categoryName, CategorySource source) {
+        if (categoryName == null || categoryName.isBlank()) {
+            return false;
+        }
+
+        if ("미분류".equals(categoryName)) {
+            return false;
+        }
+
+        return source != CategorySource.UNKNOWN;
     }
 
     private String normalizePlatform(String platform) {
@@ -99,6 +120,8 @@ public class ProblemTagResolver {
 
         String normalized = title
                 .replace('\u00A0', ' ')
+                .replace('\u2005', ' ')
+                .replace('\u200B', ' ')
                 .replaceAll("\\s+", " ")
                 .trim();
 
@@ -111,28 +134,53 @@ public class ProblemTagResolver {
         return normalized;
     }
 
+    private String normalizeCategoryName(String categoryName) {
+        if (categoryName == null || categoryName.isBlank()) {
+            return "미분류";
+        }
+
+        return categoryName.trim();
+    }
+
     private TagResolveResult resolveBaekjoon(Long problemNumber) {
         List<String> tagKeys = solvedAcClient.getTagKeys(problemNumber);
 
         if (tagKeys.isEmpty()) {
-            return new TagResolveResult("구현", CategorySource.UNKNOWN);
+            return new TagResolveResult("미분류", CategorySource.UNKNOWN);
         }
 
         String categoryName = categoryMappingService.mapSolvedAcTagsToCategory(tagKeys);
+
+        if (categoryName == null || categoryName.isBlank()) {
+            return new TagResolveResult("미분류", CategorySource.UNKNOWN);
+        }
+
         return new TagResolveResult(categoryName, CategorySource.SOLVED_AC);
     }
 
     private TagResolveResult resolveProgrammers(
+            Long problemNumber,
             String problemTitle,
             String language,
             String codeContent
     ) {
+        System.out.println("[Programmers Rule 기반 분류 요청]");
+        System.out.println("problemNumber = " + problemNumber);
+        System.out.println("title = " + problemTitle);
+        System.out.println("language = " + language);
+        System.out.println("code length = " + (codeContent == null ? 0 : codeContent.length()));
+
         String categoryName = aiCategoryClassifier.classify(
                 "PROGRAMMERS",
+                problemNumber,
                 problemTitle,
                 language,
                 codeContent
         );
+
+        categoryName = normalizeCategoryName(categoryName);
+
+        System.out.println("[Programmers Rule 기반 결과] " + problemTitle + " -> " + categoryName);
 
         if ("미분류".equals(categoryName)) {
             return new TagResolveResult("미분류", CategorySource.UNKNOWN);
@@ -150,6 +198,7 @@ public class ProblemTagResolver {
     ) {
         String normalizedPlatform = normalizePlatform(platform);
         String normalizedTitle = normalizeProblemTitle(normalizedPlatform, problemTitle);
+        String normalizedCategoryName = normalizeCategoryName(categoryName);
 
         ProblemTagCache cache = problemTagCacheRepository
                 .findByPlatformAndProblemNumber(normalizedPlatform, problemNumber)
@@ -157,10 +206,10 @@ public class ProblemTagResolver {
                         normalizedPlatform,
                         problemNumber,
                         normalizedTitle,
-                        categoryName,
+                        normalizedCategoryName,
                         CategorySource.USER_CORRECTED
                 )));
 
-        cache.updateCategory(categoryName, CategorySource.USER_CORRECTED);
+        cache.updateCategory(normalizedCategoryName, CategorySource.USER_CORRECTED);
     }
 }

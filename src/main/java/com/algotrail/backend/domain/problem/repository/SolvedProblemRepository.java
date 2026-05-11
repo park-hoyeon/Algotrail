@@ -11,12 +11,14 @@ import org.springframework.data.jpa.repository.Modifying;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Long> {
 
     boolean existsByUserAndProblem(User user, Problem problem);
 
     boolean existsByUserIdAndProblemId(Long userId, Long problemId);
+
     List<SolvedProblem> findByUserIdOrderBySolvedDateDesc(Long userId);
 
     long countByUserId(Long userId);
@@ -41,6 +43,8 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
     List<SolvedProblem> findByUserIdAndGithubUrlIsNotNull(Long userId);
 
     void deleteByUserIdAndGithubUrlIsNotNull(Long userId);
+
+    Optional<SolvedProblem> findFirstByProblemOrderBySolvedDateDesc(Problem problem);
 
     @Query("""
         SELECT DISTINCT sp
@@ -99,12 +103,12 @@ public interface SolvedProblemRepository extends JpaRepository<SolvedProblem, Lo
         FROM SolvedProblem sp
         WHERE sp.user.id = :userId
         """)
-    List<LocalDate> findSolvedDates(Long userId);
+    List<LocalDate> findSolvedDates(@Param("userId") Long userId);
 
     @Modifying
     @Query("""
-    DELETE FROM SolvedProblem sp
-    WHERE sp.user.id = :userId
-""")
+        DELETE FROM SolvedProblem sp
+        WHERE sp.user.id = :userId
+        """)
     void deleteAllByUserId(@Param("userId") Long userId);
 }
