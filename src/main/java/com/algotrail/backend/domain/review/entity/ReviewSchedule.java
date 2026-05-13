@@ -52,4 +52,9 @@ public class ReviewSchedule {
         this.status = "PENDING";
         this.completedAt = null;
     }
+
+    public void reschedule(LocalDate baseDate, LocalDate reviewDate) {
+        this.baseDate = baseDate;
+        this.reviewDate = reviewDate;
+    }
 }

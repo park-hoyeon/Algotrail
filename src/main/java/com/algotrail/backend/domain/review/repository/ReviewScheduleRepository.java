@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, Long> {
 
@@ -121,5 +122,10 @@ public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, 
     long countTodayDistinctReviewProblems(
             @Param("userId") Long userId,
             @Param("today") LocalDate today
+    );
+
+    Optional<ReviewSchedule> findBySolvedProblemIdAndReviewRound(
+            Long solvedProblemId,
+            int reviewRound
     );
 }

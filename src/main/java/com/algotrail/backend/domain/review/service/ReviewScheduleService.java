@@ -2,6 +2,7 @@ package com.algotrail.backend.domain.review.service;
 
 import com.algotrail.backend.domain.problem.entity.SolvedProblem;
 import com.algotrail.backend.domain.problem.repository.SolvedProblemRepository;
+import com.algotrail.backend.domain.review.dto.ReviewCompleteResponse;
 import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.repository.ReviewScheduleRepository;
 import lombok.RequiredArgsConstructor;
@@ -171,11 +172,67 @@ public class ReviewScheduleService {
     }
 
     @Transactional
-    public void completeReview(Long reviewScheduleId) {
-        ReviewSchedule reviewSchedule = reviewScheduleRepository.findById(reviewScheduleId)
+    public ReviewCompleteResponse completeReview(Long reviewScheduleId) {
+        ReviewSchedule schedule = reviewScheduleRepository.findById(reviewScheduleId)
                 .orElseThrow(() -> new IllegalArgumentException("복습 일정을 찾을 수 없습니다."));
 
-        reviewSchedule.complete();
+        schedule.complete();
+
+        updateNextReviewDate(schedule);
+
+        return new ReviewCompleteResponse(
+                schedule.getId(),
+                schedule.getStatus(),
+                schedule.getCompletedAt(),
+                "복습이 완료되었습니다. 다음 복습 일정이 완료일 기준으로 다시 계산되었습니다."
+        );
+    }
+
+    private void updateNextReviewDate(ReviewSchedule completedSchedule) {
+        int currentRound = completedSchedule.getReviewRound();
+
+        if (currentRound >= 4) {
+            return;
+        }
+
+        int nextRound = currentRound + 1;
+
+        reviewScheduleRepository
+                .findBySolvedProblemIdAndReviewRound(
+                        completedSchedule.getSolvedProblem().getId(),
+                        nextRound
+                )
+                .ifPresent(nextSchedule -> {
+                    if ("COMPLETED".equals(nextSchedule.getStatus())) {
+                        return;
+                    }
+
+                    LocalDate completedDate = completedSchedule.getCompletedAt().toLocalDate();
+
+                    int plusDays = getDaysBetweenRounds(currentRound, nextRound);
+
+                    nextSchedule.reschedule(
+                            completedDate,
+                            completedDate.plusDays(plusDays)
+                    );
+                });
+    }
+
+    private int getDaysBetweenRounds(int currentRound, int nextRound) {
+        int currentDay = getReviewDayByRound(currentRound);
+        int nextDay = getReviewDayByRound(nextRound);
+
+        return nextDay - currentDay;
+    }
+
+    private int getReviewDayByRound(int round) {
+        return switch (round) {
+            case 1 -> 3;
+            case 2 -> 7;
+            case 3 -> 14;
+            case 4 -> 30;
+            default -> throw new IllegalArgumentException("잘못된 복습 차수입니다.");
+        };
     }
 
     @Transactional

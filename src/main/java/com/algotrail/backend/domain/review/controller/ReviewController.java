@@ -1,6 +1,7 @@
 package com.algotrail.backend.domain.review.controller;
 
 import com.algotrail.backend.domain.review.dto.*;
+import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.service.ReviewScheduleService;
 import com.algotrail.backend.domain.review.service.ReviewService;
 import lombok.RequiredArgsConstructor;
@@ -8,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
-
+import com.algotrail.backend.domain.review.dto.ReviewCompleteResponse;
 @RestController
 @RequestMapping("/api/reviews")
 @RequiredArgsConstructor
@@ -45,8 +46,8 @@ public class ReviewController {
     }
 
     @PatchMapping("/{reviewScheduleId}/complete")
-    public void completeReview(@PathVariable Long reviewScheduleId) {
-        reviewService.completeReview(reviewScheduleId);
+    public ReviewCompleteResponse completeReview(@PathVariable Long reviewScheduleId) {
+        return reviewService.completeReview(reviewScheduleId);
     }
 
     @PatchMapping("/{reviewScheduleId}/retry")
