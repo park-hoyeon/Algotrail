@@ -110,4 +110,16 @@ public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, 
     WHERE rs.solvedProblem.user.id = :userId
 """)
     void deleteAllByUserId(@Param("userId") Long userId);
+
+    @Query("""
+    SELECT COUNT(DISTINCT rs.solvedProblem.id)
+    FROM ReviewSchedule rs
+    WHERE rs.solvedProblem.user.id = :userId
+      AND rs.status = 'PENDING'
+      AND rs.reviewDate <= :today
+""")
+    long countTodayDistinctReviewProblems(
+            @Param("userId") Long userId,
+            @Param("today") LocalDate today
+    );
 }

@@ -13,6 +13,7 @@ public record DashboardResponse(
         long totalSolvedCount,
         long todaySolvedCount,
         int todayGoalCount,
+        long todayReviewCount,
         long reviewCompletedCount,
         int todayCompletionRate,
         int averageSolveTimeMinutes,

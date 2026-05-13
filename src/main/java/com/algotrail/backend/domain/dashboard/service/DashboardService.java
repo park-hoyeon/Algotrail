@@ -49,10 +49,14 @@ public class DashboardService {
                                 "PENDING"
                         );
 
+        // ✅ 홈 화면용: 오늘 실제로 복습해야 하는 문제 수
+        // ReviewSchedule 개수가 아니라 solvedProblem 기준으로 중복 제거
+        long todayReviewCount =
+                reviewScheduleRepository.countTodayDistinctReviewProblems(userId, today);
+
         List<SolvedProblem> recentSolvedProblems =
                 solvedProblemRepository.findTop5ByUserIdOrderBySolvedDateDesc(userId);
 
-        // ✅ 안전한 streak 계산 (문제 풀이 기준)
         List<LocalDate> solvedDates =
                 solvedProblemRepository
                         .findDistinctSolvedDatesByUserIdOrderBySolvedDateDesc(userId);
@@ -60,7 +64,6 @@ public class DashboardService {
         int currentStreak = calculateCurrentStreak(solvedDates);
         int maxStreak = calculateMaxStreak(solvedDates);
 
-        // 평균 풀이 시간
         LocalDate thirtyDaysAgo = today.minusDays(30);
 
         Double average =
@@ -70,7 +73,6 @@ public class DashboardService {
         int averageSolveTimeMinutes =
                 average == null ? 0 : (int) Math.round(average);
 
-        // GitHub sync
         GithubSyncLog lastSyncLog =
                 githubSyncLogRepository
                         .findTopByUserIdOrderBySyncStartedAtDesc(userId)
@@ -86,6 +88,7 @@ public class DashboardService {
                 totalSolvedCount,
                 todaySolvedCount,
                 TODAY_GOAL_COUNT,
+                todayReviewCount,
                 reviewCompletedCount,
                 todayCompletionRate,
                 averageSolveTimeMinutes,
@@ -101,9 +104,6 @@ public class DashboardService {
         );
     }
 
-    // =========================
-    // 현재 연속 학습
-    // =========================
     private int calculateCurrentStreak(List<LocalDate> solvedDates) {
 
         if (solvedDates == null || solvedDates.isEmpty()) {
@@ -127,9 +127,6 @@ public class DashboardService {
         return streak;
     }
 
-    // =========================
-    // 최대 연속 학습
-    // =========================
     private int calculateMaxStreak(List<LocalDate> solvedDates) {
 
         if (solvedDates == null || solvedDates.isEmpty()) {
