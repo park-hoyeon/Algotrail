@@ -372,7 +372,7 @@ public class GithubSyncService {
 
             saveResolvedCategory(problem, resolvedCategoryName);
 
-            reviewScheduleService.createReviewSchedulesForProblems(List.of(solvedProblem));
+            //reviewScheduleService.createReviewSchedulesForProblems(List.of(solvedProblem));
         });
 
         System.out.println("[GitHub Sync] 문제 저장 완료: "
