@@ -24,14 +24,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 @Service
@@ -52,14 +53,13 @@ public class GithubSyncService {
     private final ReviewScheduleRepository reviewScheduleRepository;
     private final GithubSyncLockService githubSyncLockService;
     private final ProblemTagResolver problemTagResolver;
+    private final TransactionTemplate transactionTemplate;
 
     @Async
-    @Transactional
     public void syncAsync(Long userId) {
         sync(userId);
     }
 
-    @Transactional
     public GithubSyncResponse sync(Long userId) {
         LocalDateTime startedAt = LocalDateTime.now();
 
@@ -82,29 +82,25 @@ public class GithubSyncService {
         }
 
         try {
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
+            GithubRepository connectedRepository = transactionTemplate.execute(status ->
+                    githubRepositoryRepository.findByUserId(userId)
+                            .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."))
+            );
 
-            GithubRepository connectedRepository = githubRepositoryRepository.findByUserId(userId)
-                    .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
+            if (connectedRepository == null) {
+                throw new IllegalArgumentException("연동된 GitHub 저장소가 없습니다.");
+            }
 
             String safeRootPath = normalizeRootPath(connectedRepository.getRootPath());
 
-            List<SolvedProblem> newlySavedSolvedProblems = new ArrayList<>();
-
             SyncResult totalResult = syncRootDirectory(
-                    user,
+                    userId,
                     connectedRepository,
-                    safeRootPath,
-                    newlySavedSolvedProblems
+                    safeRootPath
             );
 
             int newSolvedCount = totalResult.addedCount();
             int skippedCount = totalResult.skippedCount();
-
-            if (!newlySavedSolvedProblems.isEmpty()) {
-                reviewScheduleService.createReviewSchedulesForProblems(newlySavedSolvedProblems);
-            }
 
             LocalDateTime finishedAt = LocalDateTime.now();
 
@@ -113,18 +109,25 @@ public class GithubSyncService {
                     + skippedCount
                     + "개입니다.";
 
-            connectedRepository.updateLastSyncedAt();
-            githubRepositoryRepository.saveAndFlush(connectedRepository);
+            transactionTemplate.executeWithoutResult(status -> {
+                GithubRepository repository = githubRepositoryRepository.findByUserId(userId)
+                        .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
 
-            saveSyncLog(
-                    userId,
-                    startedAt,
-                    finishedAt,
-                    newSolvedCount,
-                    skippedCount,
-                    GithubSyncStatus.SUCCESS,
-                    message
-            );
+                repository.updateLastSyncedAt();
+                githubRepositoryRepository.save(repository);
+
+                saveSyncLog(
+                        userId,
+                        startedAt,
+                        finishedAt,
+                        newSolvedCount,
+                        skippedCount,
+                        GithubSyncStatus.SUCCESS,
+                        message
+                );
+            });
+
+            System.out.println("[GitHub Sync] 완료 userId=" + userId + " / " + message);
 
             return new GithubSyncResponse(
                     userId,
@@ -137,10 +140,16 @@ public class GithubSyncService {
             );
 
         } catch (Exception e) {
+            e.printStackTrace();
+
             LocalDateTime finishedAt = LocalDateTime.now();
             String message = "GitHub 동기화 중 오류가 발생했습니다: " + e.getMessage();
 
-            saveSyncLog(userId, startedAt, finishedAt, 0, 0, GithubSyncStatus.FAILED, message);
+            transactionTemplate.executeWithoutResult(status ->
+                    saveSyncLog(userId, startedAt, finishedAt, 0, 0, GithubSyncStatus.FAILED, message)
+            );
+
+            System.out.println("[GitHub Sync] 실패 userId=" + userId + " / " + message);
 
             return new GithubSyncResponse(
                     userId,
@@ -159,10 +168,9 @@ public class GithubSyncService {
     }
 
     private SyncResult syncRootDirectory(
-            User user,
+            Long userId,
             GithubRepository connectedRepository,
-            String rootPath,
-            List<SolvedProblem> newlySavedSolvedProblems
+            String rootPath
     ) {
         String url = buildContentsUrl(
                 connectedRepository.getGithubUsername(),
@@ -170,11 +178,9 @@ public class GithubSyncService {
                 rootPath
         );
 
-        GithubContentResponse[] contents = webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToMono(GithubContentResponse[].class)
-                .block();
+        System.out.println("[GitHub Sync] root contents url=" + url);
+
+        GithubContentResponse[] contents = fetchContentsSafely(rootPath, url);
 
         if (contents == null) {
             return SyncResult.none();
@@ -191,25 +197,23 @@ public class GithubSyncService {
                 continue;
             }
 
-            if ("dir".equals(content.type())) {
-                SyncResult result = syncGenericDirectory(
-                        user,
+            if ("file".equals(content.type()) && isAlgorithmSolutionFile(content.path())) {
+                SyncResult result = syncCodeFile(
+                        userId,
                         connectedRepository,
-                        content.path(),
-                        newlySavedSolvedProblems
+                        content,
+                        content.path()
                 );
 
                 totalResult = totalResult.plus(result);
                 continue;
             }
 
-            if ("file".equals(content.type()) && isAlgorithmSolutionFile(content.path())) {
-                SyncResult result = syncCodeFile(
-                        user,
+            if ("dir".equals(content.type())) {
+                SyncResult result = syncGenericDirectory(
+                        userId,
                         connectedRepository,
-                        content,
-                        content.path(),
-                        newlySavedSolvedProblems
+                        content.path()
                 );
 
                 totalResult = totalResult.plus(result);
@@ -220,10 +224,9 @@ public class GithubSyncService {
     }
 
     private SyncResult syncGenericDirectory(
-            User user,
+            Long userId,
             GithubRepository connectedRepository,
-            String directoryPath,
-            List<SolvedProblem> newlySavedSolvedProblems
+            String directoryPath
     ) {
         if (shouldSkipPath(directoryPath)) {
             return SyncResult.none();
@@ -235,36 +238,13 @@ public class GithubSyncService {
                 directoryPath
         );
 
-        GithubContentResponse[] contents = webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToMono(GithubContentResponse[].class)
-                .block();
+        GithubContentResponse[] contents = fetchContentsSafely(directoryPath, url);
 
         if (contents == null) {
-            return SyncResult.none();
+            return SyncResult.skipped();
         }
-
-        List<GithubContentResponse> codeFiles = Arrays.stream(contents)
-                .filter(file -> file != null && "file".equals(file.type()))
-                .filter(file -> isAlgorithmSolutionFile(file.path()))
-                .toList();
 
         SyncResult totalResult = SyncResult.none();
-
-        if (!codeFiles.isEmpty()) {
-            GithubContentResponse codeFile = codeFiles.get(0);
-
-            SyncResult result = syncCodeFile(
-                    user,
-                    connectedRepository,
-                    codeFile,
-                    codeFile.path(),
-                    newlySavedSolvedProblems
-            );
-
-            totalResult = totalResult.plus(result);
-        }
 
         for (GithubContentResponse content : contents) {
             if (content == null || content.path() == null) {
@@ -275,12 +255,23 @@ public class GithubSyncService {
                 continue;
             }
 
+            if ("file".equals(content.type()) && isAlgorithmSolutionFile(content.path())) {
+                SyncResult result = syncCodeFile(
+                        userId,
+                        connectedRepository,
+                        content,
+                        content.path()
+                );
+
+                totalResult = totalResult.plus(result);
+                continue;
+            }
+
             if ("dir".equals(content.type())) {
                 SyncResult result = syncGenericDirectory(
-                        user,
+                        userId,
                         connectedRepository,
-                        content.path(),
-                        newlySavedSolvedProblems
+                        content.path()
                 );
 
                 totalResult = totalResult.plus(result);
@@ -290,12 +281,26 @@ public class GithubSyncService {
         return totalResult;
     }
 
+    private GithubContentResponse[] fetchContentsSafely(String path, String url) {
+        try {
+            return webClient.get()
+                    .uri(URI.create(url))
+                    .retrieve()
+                    .bodyToMono(GithubContentResponse[].class)
+                    .block();
+
+        } catch (Exception e) {
+            System.out.println("[GitHub Sync] 디렉토리 조회 실패, 건너뜀 path="
+                    + path + " / url=" + url + " / error=" + e.getMessage());
+            return null;
+        }
+    }
+
     private SyncResult syncCodeFile(
-            User user,
+            Long userId,
             GithubRepository connectedRepository,
             GithubContentResponse codeFile,
-            String path,
-            List<SolvedProblem> newlySavedSolvedProblems
+            String path
     ) {
         String problemDirectoryName = parseProblemDirectoryName(path);
         Long problemNumber = parseProblemNumber(problemDirectoryName);
@@ -311,38 +316,21 @@ public class GithubSyncService {
         String level = inferLevelFromPath(path);
         String language = detectLanguage(codeFile.name());
 
-        if (solvedProblemRepository.existsByUserIdAndProblemPlatformAndProblemProblemNumber(
-                user.getId(),
-                platform,
-                problemNumber
-        )) {
+        Boolean alreadyExists = transactionTemplate.execute(status ->
+                solvedProblemRepository.existsByUserIdAndProblemPlatformAndProblemProblemNumber(
+                        userId,
+                        platform,
+                        problemNumber
+                )
+        );
+
+        if (Boolean.TRUE.equals(alreadyExists)) {
             return SyncResult.skipped();
         }
-
-        Problem problem = problemRepository.findByPlatformAndProblemNumber(platform, problemNumber)
-                .orElseGet(() -> problemRepository.save(
-                        new Problem(
-                                platform,
-                                problemNumber,
-                                normalizedTitle,
-                                level,
-                                null
-                        )
-                ));
 
         LocalDate solvedDate = fetchLatestCommitDateSafely(
                 connectedRepository,
                 codeFile.path()
-        );
-
-        SolvedProblem solvedProblem = solvedProblemRepository.save(
-                new SolvedProblem(
-                        user,
-                        problem,
-                        codeFile.html_url(),
-                        language,
-                        solvedDate
-                )
         );
 
         String codeContent = fetchCodeContentFromGithubUrl(codeFile.html_url());
@@ -357,9 +345,35 @@ public class GithubSyncService {
 
         String resolvedCategoryName = tagResult.categoryName();
 
-        saveResolvedCategory(problem, resolvedCategoryName);
+        transactionTemplate.executeWithoutResult(status -> {
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
 
-        newlySavedSolvedProblems.add(solvedProblem);
+            Problem problem = problemRepository.findByPlatformAndProblemNumber(platform, problemNumber)
+                    .orElseGet(() -> problemRepository.save(
+                            new Problem(
+                                    platform,
+                                    problemNumber,
+                                    normalizedTitle,
+                                    level,
+                                    null
+                            )
+                    ));
+
+            SolvedProblem solvedProblem = solvedProblemRepository.save(
+                    new SolvedProblem(
+                            user,
+                            problem,
+                            codeFile.html_url(),
+                            language,
+                            solvedDate
+                    )
+            );
+
+            saveResolvedCategory(problem, resolvedCategoryName);
+
+            reviewScheduleService.createReviewSchedulesForProblems(List.of(solvedProblem));
+        });
 
         System.out.println("[GitHub Sync] 문제 저장 완료: "
                 + problemNumber + ". " + normalizedTitle
@@ -447,6 +461,8 @@ public class GithubSyncService {
         try {
             return fetchLatestCommitDate(connectedRepository, problemPath);
         } catch (Exception e) {
+            System.out.println("[GitHub Sync] 커밋 날짜 조회 실패, 오늘 날짜로 대체 path="
+                    + problemPath + " / error=" + e.getMessage());
             return LocalDate.now();
         }
     }
@@ -456,12 +472,14 @@ public class GithubSyncService {
             String problemPath
     ) {
         URI uri = UriComponentsBuilder
-                .fromUriString("https://api.github.com/repos/"
-                        + connectedRepository.getGithubUsername()
-                        + "/"
-                        + connectedRepository.getRepositoryName()
-                        + "/commits")
-                .queryParam("path", problemPath)
+                .fromUriString("https://api.github.com")
+                .pathSegment(
+                        "repos",
+                        connectedRepository.getGithubUsername(),
+                        connectedRepository.getRepositoryName(),
+                        "commits"
+                )
+                .queryParam("path", decodeGithubPath(problemPath))
                 .queryParam("per_page", 1)
                 .build()
                 .encode()
@@ -491,17 +509,37 @@ public class GithubSyncService {
     }
 
     private String buildContentsUrl(String githubUsername, String repositoryName, String path) {
-        String baseUrl = "https://api.github.com/repos/"
-                + githubUsername
-                + "/"
-                + repositoryName
-                + "/contents";
+        UriComponentsBuilder builder = UriComponentsBuilder
+                .fromUriString("https://api.github.com")
+                .pathSegment("repos", githubUsername, repositoryName, "contents");
 
-        if (path == null || path.isBlank()) {
-            return baseUrl;
+        String safePath = decodeGithubPath(path);
+
+        if (!safePath.isBlank()) {
+            String[] pathSegments = safePath.split("/");
+
+            for (String segment : pathSegments) {
+                if (segment != null && !segment.isBlank()) {
+                    builder.pathSegment(segment);
+                }
+            }
         }
 
-        return baseUrl + "/" + path;
+        return builder.build()
+                .encode()
+                .toUriString();
+    }
+
+    private String decodeGithubPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+
+        try {
+            return URLDecoder.decode(path, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return path;
+        }
     }
 
     private void saveSyncLog(
@@ -537,7 +575,8 @@ public class GithubSyncService {
             return "";
         }
 
-        String[] tokens = path.split("/");
+        String decodedPath = decodeGithubPath(path);
+        String[] tokens = decodedPath.split("/");
 
         if (tokens.length >= 2) {
             return tokens[tokens.length - 2];
@@ -596,25 +635,47 @@ public class GithubSyncService {
     }
 
     private boolean shouldSkipPath(String path) {
-        if (path == null) return true;
+        if (path == null || path.isBlank()) {
+            return true;
+        }
 
-        String lowerPath = path.toLowerCase();
+        String normalizedPath = decodeGithubPath(path)
+                .replace("\\", "/")
+                .toLowerCase();
 
-        return lowerPath.contains("readme")
-                || lowerPath.contains(".git")
-                || lowerPath.contains("node_modules")
-                || lowerPath.contains("build")
-                || lowerPath.contains("dist")
-                || lowerPath.contains(".idea")
-                || lowerPath.contains(".gradle")
-                || lowerPath.contains("target")
-                || lowerPath.contains("out");
+        String[] segments = normalizedPath.split("/");
+
+        for (String segment : segments) {
+            if (segment == null || segment.isBlank()) {
+                continue;
+            }
+
+            if (segment.equals(".git")
+                    || segment.equals("node_modules")
+                    || segment.equals("build")
+                    || segment.equals("dist")
+                    || segment.equals(".idea")
+                    || segment.equals(".gradle")
+                    || segment.equals("target")
+                    || segment.equals("out")
+                    || segment.equals("__pycache__")) {
+                return true;
+            }
+
+            if (segment.equals("readme.md")
+                    || segment.equals("readme.txt")
+                    || segment.equals("readme")) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private boolean isAlgorithmSolutionFile(String path) {
         if (path == null) return false;
 
-        String lowerPath = path.toLowerCase();
+        String lowerPath = decodeGithubPath(path).toLowerCase();
 
         if (shouldSkipPath(lowerPath)) {
             return false;
@@ -631,12 +692,14 @@ public class GithubSyncService {
     private String detectLanguage(String filename) {
         if (filename == null) return "Unknown";
 
-        if (filename.endsWith(".java")) return "Java";
-        if (filename.endsWith(".py")) return "Python";
-        if (filename.endsWith(".js")) return "JavaScript";
-        if (filename.endsWith(".cpp")) return "C++";
-        if (filename.endsWith(".c")) return "C";
-        if (filename.endsWith(".kt")) return "Kotlin";
+        String lowerFilename = filename.toLowerCase();
+
+        if (lowerFilename.endsWith(".java")) return "Java";
+        if (lowerFilename.endsWith(".py")) return "Python";
+        if (lowerFilename.endsWith(".js")) return "JavaScript";
+        if (lowerFilename.endsWith(".cpp")) return "C++";
+        if (lowerFilename.endsWith(".c")) return "C";
+        if (lowerFilename.endsWith(".kt")) return "Kotlin";
 
         return "Unknown";
     }
@@ -646,13 +709,14 @@ public class GithubSyncService {
             return "CUSTOM";
         }
 
-        String lowerPath = path.toLowerCase();
+        String decodedPath = decodeGithubPath(path);
+        String lowerPath = decodedPath.toLowerCase();
 
-        if (path.contains("프로그래머스") || lowerPath.contains("programmers")) {
+        if (decodedPath.contains("프로그래머스") || lowerPath.contains("programmers")) {
             return "PROGRAMMERS";
         }
 
-        if (path.contains("백준") || lowerPath.contains("baekjoon") || lowerPath.contains("boj")) {
+        if (decodedPath.contains("백준") || lowerPath.contains("baekjoon") || lowerPath.contains("boj")) {
             return "BAEKJOON";
         }
 
@@ -672,9 +736,10 @@ public class GithubSyncService {
             return "미분류";
         }
 
-        String lowerPath = path.toLowerCase();
+        String decodedPath = decodeGithubPath(path);
+        String lowerPath = decodedPath.toLowerCase();
 
-        if (path.contains("프로그래머스") || lowerPath.contains("programmers")) {
+        if (decodedPath.contains("프로그래머스") || lowerPath.contains("programmers")) {
             if (lowerPath.contains("lv.0") || lowerPath.contains("level0") || lowerPath.contains("/0/")) return "Lv.0";
             if (lowerPath.contains("lv.1") || lowerPath.contains("level1") || lowerPath.contains("/1/")) return "Lv.1";
             if (lowerPath.contains("lv.2") || lowerPath.contains("level2") || lowerPath.contains("/2/")) return "Lv.2";
@@ -685,7 +750,7 @@ public class GithubSyncService {
             return "Lv.미정";
         }
 
-        if (path.contains("백준") || lowerPath.contains("baekjoon") || lowerPath.contains("boj")) {
+        if (decodedPath.contains("백준") || lowerPath.contains("baekjoon") || lowerPath.contains("boj")) {
             if (lowerPath.contains("bronze")) return "Bronze";
             if (lowerPath.contains("silver")) return "Silver";
             if (lowerPath.contains("gold")) return "Gold";
@@ -729,7 +794,6 @@ public class GithubSyncService {
 
     @Transactional
     public void disconnectGithub(Long userId, boolean resetRecords) {
-
         GithubRepository connectedRepository =
                 githubRepositoryRepository.findByUserId(userId)
                         .orElse(null);
