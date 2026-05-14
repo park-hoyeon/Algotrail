@@ -54,6 +54,7 @@ public class GithubSyncService {
     private final ProblemTagResolver problemTagResolver;
 
     @Async
+    @Transactional
     public void syncAsync(Long userId) {
         sync(userId);
     }
@@ -113,6 +114,7 @@ public class GithubSyncService {
                     + "개입니다.";
 
             connectedRepository.updateLastSyncedAt();
+            githubRepositoryRepository.saveAndFlush(connectedRepository);
 
             saveSyncLog(
                     userId,
@@ -732,13 +734,11 @@ public class GithubSyncService {
                 githubRepositoryRepository.findByUserId(userId)
                         .orElse(null);
 
-        // 기록 초기화는 연동 여부와 관계없이 가능해야 함
         if (resetRecords) {
             reviewScheduleRepository.deleteAllByUserId(userId);
             solvedProblemRepository.deleteAllByUserId(userId);
         }
 
-        // 연동 정보가 있을 때만 삭제
         if (connectedRepository != null) {
             githubRepositoryRepository.delete(connectedRepository);
         }
