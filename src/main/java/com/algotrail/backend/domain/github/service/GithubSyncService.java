@@ -727,14 +727,20 @@ public class GithubSyncService {
 
     @Transactional
     public void disconnectGithub(Long userId, boolean resetRecords) {
-        GithubRepository connectedRepository = githubRepositoryRepository.findByUserId(userId)
-                .orElseThrow(() -> new IllegalArgumentException("연동된 GitHub 저장소가 없습니다."));
 
+        GithubRepository connectedRepository =
+                githubRepositoryRepository.findByUserId(userId)
+                        .orElse(null);
+
+        // 기록 초기화는 연동 여부와 관계없이 가능해야 함
         if (resetRecords) {
             reviewScheduleRepository.deleteAllByUserId(userId);
             solvedProblemRepository.deleteAllByUserId(userId);
         }
 
-        githubRepositoryRepository.delete(connectedRepository);
+        // 연동 정보가 있을 때만 삭제
+        if (connectedRepository != null) {
+            githubRepositoryRepository.delete(connectedRepository);
+        }
     }
 }
