@@ -1,7 +1,6 @@
 package com.algotrail.backend.domain.review.controller;
 
 import com.algotrail.backend.domain.review.dto.*;
-import com.algotrail.backend.domain.review.entity.ReviewSchedule;
 import com.algotrail.backend.domain.review.service.ReviewScheduleService;
 import com.algotrail.backend.domain.review.service.ReviewService;
 import lombok.RequiredArgsConstructor;
@@ -9,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
-import com.algotrail.backend.domain.review.dto.ReviewCompleteResponse;
+
 @RestController
 @RequestMapping("/api/reviews")
 @RequiredArgsConstructor
@@ -117,7 +116,7 @@ public class ReviewController {
                 result.deletedCount(),
                 result.createdProblemCount(),
                 result.createdScheduleCount(),
-                request.startDate() + " 이후 풀이 문제부터 복습 일정이 다시 생성되었습니다."
+                "완료한 복습 기록은 유지하고, 남은 복습 일정만 다시 계산했습니다."
         );
     }
 }

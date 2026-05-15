@@ -10,7 +10,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -59,28 +61,133 @@ public class ReviewScheduleService {
             Long userId,
             LocalDate startDate
     ) {
-        List<ReviewSchedule> pendingSchedules =
-                reviewScheduleRepository.findBySolvedProblemUserIdAndStatus(
-                        userId,
-                        STATUS_PENDING
-                );
+        List<SolvedProblem> solvedProblems =
+                solvedProblemRepository.findByUserIdOrderBySolvedDateDesc(userId);
 
-        int deletedCount = pendingSchedules.size();
-        reviewScheduleRepository.deleteAll(pendingSchedules);
+        int deletedCount = 0;
+        int createdScheduleCount = 0;
+        int affectedProblemCount = 0;
 
-        List<SolvedProblem> targetProblems =
-                solvedProblemRepository.findByUserIdAndSolvedDateGreaterThanEqualOrderBySolvedDateDesc(
-                        userId,
-                        startDate
-                );
+        for (SolvedProblem solvedProblem : solvedProblems) {
+            List<ReviewSchedule> schedules =
+                    reviewScheduleRepository.findBySolvedProblemIdOrderByReviewRoundAsc(
+                            solvedProblem.getId()
+                    );
 
-        int createdProblemCount = createReviewSchedulesForProblems(targetProblems);
+            boolean hasCompletedSchedule = schedules.stream()
+                    .anyMatch(schedule -> STATUS_COMPLETED.equals(schedule.getStatus()));
+
+            boolean isTargetProblem =
+                    isSolvedAfterOrOn(solvedProblem, startDate) || hasCompletedSchedule;
+
+            if (!isTargetProblem) {
+                continue;
+            }
+
+            List<ReviewSchedule> pendingSchedules = schedules.stream()
+                    .filter(schedule -> STATUS_PENDING.equals(schedule.getStatus()))
+                    .toList();
+
+            deletedCount += pendingSchedules.size();
+            reviewScheduleRepository.deleteAll(pendingSchedules);
+
+            int createdForProblem = recreateOnlyNotCompletedSchedules(
+                    solvedProblem,
+                    schedules,
+                    startDate
+            );
+
+            if (createdForProblem > 0 || !pendingSchedules.isEmpty()) {
+                affectedProblemCount++;
+            }
+
+            createdScheduleCount += createdForProblem;
+        }
 
         return new ReviewRebuildResult(
                 deletedCount,
-                createdProblemCount,
-                createdProblemCount * REVIEW_DAYS.length
+                affectedProblemCount,
+                createdScheduleCount
         );
+    }
+
+    private boolean isSolvedAfterOrOn(SolvedProblem solvedProblem, LocalDate startDate) {
+        LocalDate solvedDate = getSolvedBaseDate(solvedProblem);
+        return !solvedDate.isBefore(startDate);
+    }
+
+    private int recreateOnlyNotCompletedSchedules(
+            SolvedProblem solvedProblem,
+            List<ReviewSchedule> oldSchedules,
+            LocalDate startDate
+    ) {
+        Set<Integer> completedRounds = new HashSet<>();
+
+        ReviewSchedule latestCompletedSchedule = null;
+
+        for (ReviewSchedule schedule : oldSchedules) {
+            if (!STATUS_COMPLETED.equals(schedule.getStatus())) {
+                continue;
+            }
+
+            completedRounds.add(schedule.getReviewRound());
+
+            if (latestCompletedSchedule == null ||
+                    schedule.getReviewRound() > latestCompletedSchedule.getReviewRound()) {
+                latestCompletedSchedule = schedule;
+            }
+        }
+
+        int createdCount = 0;
+
+        for (int i = 0; i < REVIEW_DAYS.length; i++) {
+            int round = i + 1;
+
+            if (completedRounds.contains(round)) {
+                continue;
+            }
+
+            boolean exists = reviewScheduleRepository.existsBySolvedProblemIdAndReviewRound(
+                    solvedProblem.getId(),
+                    round
+            );
+
+            if (exists) {
+                continue;
+            }
+
+            LocalDate baseDate;
+            LocalDate reviewDate;
+
+            if (latestCompletedSchedule != null &&
+                    round > latestCompletedSchedule.getReviewRound()) {
+
+                LocalDate completedDate =
+                        latestCompletedSchedule.getCompletedAt().toLocalDate();
+
+                int plusDays = getReviewDayByRound(round)
+                        - getReviewDayByRound(latestCompletedSchedule.getReviewRound());
+
+                baseDate = completedDate;
+                reviewDate = completedDate.plusDays(plusDays);
+
+            } else {
+                baseDate = getSolvedBaseDate(solvedProblem);
+                reviewDate = baseDate.plusDays(REVIEW_DAYS[i]);
+            }
+
+            ReviewSchedule newSchedule = new ReviewSchedule(
+                    solvedProblem,
+                    round,
+                    baseDate,
+                    reviewDate
+            );
+
+            reviewScheduleRepository.save(newSchedule);
+            createdCount++;
+        }
+
+        return createdCount;
     }
 
     @Transactional
@@ -203,7 +310,7 @@ public class ReviewScheduleService {
                         nextRound
                 )
                 .ifPresent(nextSchedule -> {
-                    if ("COMPLETED".equals(nextSchedule.getStatus())) {
+                    if (STATUS_COMPLETED.equals(nextSchedule.getStatus())) {
                         return;
                     }
 
